@@ -11,11 +11,21 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def convert_database_url(cls, v: str) -> str:
-        """Convert Render's postgres:// to asyncpg format."""
+        """Convert database URL to asyncpg format."""
+        # Convert postgres:// to postgresql+asyncpg://
         if v.startswith("postgres://"):
-            return v.replace("postgres://", "postgresql+asyncpg://", 1)
-        if v.startswith("postgresql://") and "+asyncpg" not in v:
-            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif v.startswith("postgresql://") and "+asyncpg" not in v:
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # Remove sslmode and channel_binding (asyncpg handles SSL differently)
+        # These are handled via connect_args in database.py
+        import re
+        v = re.sub(r'[?&]sslmode=[^&]*', '', v)
+        v = re.sub(r'[?&]channel_binding=[^&]*', '', v)
+        # Clean up dangling ? or &
+        v = re.sub(r'\?$', '', v)
+        v = re.sub(r'\?&', '?', v)
         return v
 
     # Redis
