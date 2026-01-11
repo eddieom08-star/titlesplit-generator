@@ -22,7 +22,6 @@ services:
   - type: cron
     name: titlesplit-scraper
     runtime: python
-    plan: free
     schedule: "0 7 * * *"  # Daily at 7am UTC
     buildCommand: pip install -r requirements.txt
     startCommand: python -m src.tasks.run_scraper
