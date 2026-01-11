@@ -1,0 +1,28 @@
+databases:
+  - name: titlesplit-db
+    plan: free
+    databaseName: titlesplit
+    user: titlesplit
+
+services:
+  - type: web
+    name: titlesplit-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: titlesplit-db
+          property: connectionString
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PROPERTY_DATA_API_KEY
+        sync: false
+      - key: DEBUG
+        value: false
+      - key: LOG_LEVEL
+        value: INFO
+    healthCheckPath: /
+    autoDeploy: true

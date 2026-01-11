@@ -9,6 +9,7 @@ sqlalchemy==2.0.25
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
 alembic==1.13.1
+greenlet==3.0.3
 
 # Task Queue
 celery==5.3.6
@@ -20,6 +21,9 @@ aiohttp==3.9.1
 
 # AI
 anthropic==0.18.1
+
+# Scheduler
+apscheduler==3.10.4
 
 # Utilities
 python-dotenv==1.0.0
