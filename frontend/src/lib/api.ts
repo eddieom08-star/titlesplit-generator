@@ -17,7 +17,7 @@ export interface Opportunity {
 }
 
 export async function getOpportunities(): Promise<Opportunity[]> {
-  const res = await fetch(`${API_URL}/api/opportunities`, {
+  const res = await fetch(`${API_URL}/api/opportunities?min_score=0`, {
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -82,6 +82,16 @@ export async function triggerEnrichment(batchSize: number = 10): Promise<{ statu
   });
   if (!res.ok) {
     throw new Error('Failed to trigger enrichment');
+  }
+  return res.json();
+}
+
+export async function seedDemoData(): Promise<{ status: string; count: number }> {
+  const res = await fetch(`${API_URL}/api/scraper/seed`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to seed demo data');
   }
   return res.json();
 }

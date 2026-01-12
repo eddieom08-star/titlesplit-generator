@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Opportunity, getOpportunities, formatPrice, getScoreColor, getStatusBadge, triggerScrape } from '@/lib/api';
+import { Opportunity, getOpportunities, formatPrice, getScoreColor, getStatusBadge, triggerScrape, seedDemoData } from '@/lib/api';
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -48,6 +48,21 @@ export default function Dashboard() {
     }
   }
 
+  async function handleSeedData() {
+    try {
+      setScraping(true);
+      setScrapeMessage(null);
+      const result = await seedDemoData();
+      setScrapeMessage(`Seeded ${result.count} demo properties`);
+      await loadOpportunities();
+    } catch (err) {
+      setScrapeMessage('Failed to seed demo data');
+      console.error(err);
+    } finally {
+      setScraping(false);
+    }
+  }
+
   const stats = {
     total: opportunities.length,
     hot: opportunities.filter(o => o.status === 'hot').length,
@@ -72,11 +87,18 @@ export default function Dashboard() {
             </div>
             <div className="flex gap-2">
               <Button
-                onClick={handleTriggerScrape}
+                onClick={handleSeedData}
                 disabled={scraping}
                 variant="default"
               >
-                {scraping ? 'Starting...' : 'Run Scraper'}
+                {scraping ? 'Loading...' : 'Load Demo Data'}
+              </Button>
+              <Button
+                onClick={handleTriggerScrape}
+                disabled={scraping}
+                variant="outline"
+              >
+                Run Scraper
               </Button>
               <Button onClick={loadOpportunities} variant="outline">
                 Refresh
