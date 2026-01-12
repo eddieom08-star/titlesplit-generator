@@ -288,3 +288,97 @@ export async function getValuation(
   }
   return res.json();
 }
+
+// ============================================================
+// GDV Report Types & Functions
+// ============================================================
+
+export interface UnitValuation {
+  unit_identifier: string;
+  beds: number | null;
+  sqft: number | null;
+  epc_rating: string | null;
+  estimated_value: number;
+  value_range_low: number;
+  value_range_high: number;
+  confidence: string;
+  primary_method: string;
+  price_per_sqft_used: number | null;
+  valuation_notes: string;
+}
+
+export interface GDVReport {
+  property_address: string;
+  postcode: string;
+  title_number: string | null;
+  asking_price: number;
+  total_units: number;
+  total_sqft: number | null;
+
+  // Unit valuations
+  unit_valuations: UnitValuation[];
+
+  // GDV summary
+  total_gdv: number;
+  gdv_range_low: number;
+  gdv_range_high: number;
+  gdv_confidence: string;
+
+  // Uplift analysis
+  gross_uplift: number;
+  gross_uplift_percent: number;
+  title_split_costs: number;
+  refurbishment_budget: number | null;
+  total_costs: number;
+  net_uplift: number;
+  net_uplift_percent: number;
+  net_profit_per_unit: number;
+
+  // Market context
+  local_market_data: Record<string, unknown>;
+  comparables_summary: {
+    count: number;
+    price_range?: string;
+    average?: number;
+    median?: number;
+    message?: string;
+  };
+
+  // Report metadata
+  data_sources: string[];
+  data_freshness: string;
+  confidence_statement: string;
+  limitations: string[];
+  report_date: string;
+}
+
+export interface UnitInput {
+  id: string;
+  beds?: number;
+  sqft?: number;
+  epc?: string;
+}
+
+export interface GDVReportRequest {
+  units?: UnitInput[];
+  refurbishment_budget?: number;
+  title_number?: string;
+}
+
+export async function generateGDVReport(
+  propertyId: string,
+  request: GDVReportRequest = {}
+): Promise<GDVReport> {
+  const res = await fetch(`${API_URL}/api/properties/${propertyId}/gdv-report`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'GDV report generation failed' }));
+    throw new Error(error.detail || 'Failed to generate GDV report');
+  }
+  return res.json();
+}

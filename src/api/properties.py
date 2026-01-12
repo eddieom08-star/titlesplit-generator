@@ -1,10 +1,10 @@
-"""API endpoints for property details and manual inputs."""
+"""API endpoints for property details, manual inputs, and GDV reports."""
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 import structlog
@@ -12,6 +12,9 @@ import structlog
 from src.database import AsyncSessionLocal
 from src.models.property import Property, ManualInput
 from src.services.propertydata import calculate_title_split_potential
+from src.data_sources.land_registry import LandRegistryClient
+from src.data_sources.epc import EPCClient
+from src.analysis.gdv_calculator import GDVCalculator, BlockGDVReport, UnitValuation, ValuationConfidence
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/properties", tags=["properties"])
@@ -534,4 +537,203 @@ def _serialize_manual_input(mi: ManualInput) -> dict:
         "deal_status": mi.deal_status,
         "blockers": mi.blockers,
         "updated_at": mi.updated_at.isoformat() if mi.updated_at else None,
+    }
+
+
+# ============================================================
+# GDV Report Generation
+# ============================================================
+
+class UnitInput(BaseModel):
+    """Single unit specification for GDV calculation."""
+    id: str = Field(description="Unit identifier, e.g., 'Flat 1'")
+    beds: Optional[int] = Field(None, description="Number of bedrooms")
+    sqft: Optional[float] = Field(None, description="Floor area in square feet")
+    epc: Optional[str] = Field(None, description="EPC rating A-G")
+
+
+class GDVReportRequest(BaseModel):
+    """Request for generating a lender-grade GDV report."""
+    units: Optional[list[UnitInput]] = Field(
+        None,
+        description="Unit breakdown. If not provided, will auto-generate from estimated_units"
+    )
+    refurbishment_budget: Optional[int] = Field(None, description="Additional refurb costs")
+    title_number: Optional[str] = Field(None, description="Land Registry title number")
+
+
+class GDVReportResponse(BaseModel):
+    """Lender-grade GDV report response."""
+    property_address: str
+    postcode: str
+    title_number: Optional[str] = None
+    asking_price: int
+    total_units: int
+    total_sqft: Optional[float] = None
+
+    # Unit valuations
+    unit_valuations: list[dict]
+
+    # GDV summary
+    total_gdv: int
+    gdv_range_low: int
+    gdv_range_high: int
+    gdv_confidence: str
+
+    # Uplift analysis
+    gross_uplift: int
+    gross_uplift_percent: float
+    title_split_costs: int
+    refurbishment_budget: Optional[int] = None
+    total_costs: int
+    net_uplift: int
+    net_uplift_percent: float
+    net_profit_per_unit: int
+
+    # Market context
+    local_market_data: dict
+    comparables_summary: dict
+
+    # Report metadata
+    data_sources: list[str]
+    data_freshness: str
+    confidence_statement: str
+    limitations: list[str]
+    report_date: str
+
+
+@router.post("/{property_id}/gdv-report", response_model=GDVReportResponse)
+async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
+    """
+    Generate a lender-grade GDV report for a property.
+
+    This endpoint produces a comprehensive valuation report suitable
+    for presenting to bridge/development lenders, including:
+
+    - Unit-by-unit valuations with confidence levels
+    - Land Registry comparable evidence
+    - EPC-derived floor area data
+    - Market context (HPI, yields, growth)
+    - Professional confidence statement
+    - Limitations and caveats
+
+    Data sources:
+    - HM Land Registry Price Paid Data (verified transactions)
+    - PropertyData.co.uk (AVM, £/sqft analysis)
+    - UK House Price Index (time adjustments)
+    - EPC Register (floor areas, energy ratings)
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Property)
+            .options(selectinload(Property.manual_inputs))
+            .where(Property.id == property_id)
+        )
+        property = result.scalar_one_or_none()
+
+        if not property:
+            raise HTTPException(status_code=404, detail="Property not found")
+
+        if not property.postcode:
+            raise HTTPException(status_code=400, detail="Property postcode required for GDV report")
+
+        # Get effective values (prefer manual inputs)
+        manual_input = property.manual_inputs[0] if property.manual_inputs else None
+        effective_units = (
+            manual_input.verified_units if manual_input and manual_input.verified_units
+            else property.estimated_units
+        )
+        effective_price = (
+            manual_input.revised_asking_price if manual_input and manual_input.revised_asking_price
+            else property.asking_price
+        )
+
+        if effective_units <= 0:
+            raise HTTPException(status_code=400, detail="Property must have at least 1 unit")
+
+        # Build unit list
+        if request.units:
+            units = [u.model_dump() for u in request.units]
+        elif manual_input and manual_input.unit_breakdown:
+            units = manual_input.unit_breakdown
+        else:
+            # Auto-generate unit list
+            units = [{"id": f"Unit {i+1}", "beds": 2} for i in range(effective_units)]
+
+        # Initialize clients
+        lr_client = LandRegistryClient()
+        epc_client = EPCClient()
+
+        # Get comparables
+        logger.info("Fetching Land Registry comparables", postcode=property.postcode)
+        comparables = await lr_client.get_comparable_sales(
+            postcode=property.postcode,
+            property_type="F",  # Flats
+            months_back=18,
+        )
+
+        # Get EPC data if available
+        logger.info("Fetching EPC records", postcode=property.postcode)
+        epcs = await epc_client.search_by_postcode(property.postcode)
+
+        # Initialize calculator and generate report
+        calculator = GDVCalculator(
+            land_registry_client=lr_client,
+        )
+
+        logger.info("Calculating GDV", units=len(units), asking_price=effective_price)
+        report = await calculator.calculate_block_gdv(
+            postcode=property.postcode,
+            units=units,
+            asking_price=effective_price,
+            comparables=comparables,
+            epcs=epcs,
+            split_costs=request.refurbishment_budget or 0,
+        )
+
+        # Build response
+        return GDVReportResponse(
+            property_address=property.title or property.address_line1 or "",
+            postcode=property.postcode,
+            title_number=request.title_number or (manual_input.title_number if manual_input else None),
+            asking_price=effective_price,
+            total_units=report.total_units,
+            total_sqft=report.total_sqft,
+            unit_valuations=[_serialize_unit_valuation(uv) for uv in report.unit_valuations],
+            total_gdv=report.total_gdv,
+            gdv_range_low=report.gdv_range_low,
+            gdv_range_high=report.gdv_range_high,
+            gdv_confidence=report.gdv_confidence.value,
+            gross_uplift=report.gross_uplift,
+            gross_uplift_percent=report.gross_uplift_percent,
+            title_split_costs=report.title_split_costs,
+            refurbishment_budget=request.refurbishment_budget,
+            total_costs=report.total_costs + _calculate_costs(report.total_units, effective_price, manual_input)["total"],
+            net_uplift=report.net_uplift,
+            net_uplift_percent=report.net_uplift_percent,
+            net_profit_per_unit=report.net_profit_per_unit,
+            local_market_data=report.local_market_data,
+            comparables_summary=report.comparables_summary,
+            data_sources=report.data_sources,
+            data_freshness=report.data_freshness,
+            confidence_statement=report.confidence_statement,
+            limitations=report.limitations,
+            report_date=report.report_date,
+        )
+
+
+def _serialize_unit_valuation(uv: UnitValuation) -> dict:
+    """Serialize UnitValuation for API response."""
+    return {
+        "unit_identifier": uv.unit_identifier,
+        "beds": uv.beds,
+        "sqft": uv.sqft,
+        "epc_rating": uv.epc_rating,
+        "estimated_value": uv.estimated_value,
+        "value_range_low": uv.value_range_low,
+        "value_range_high": uv.value_range_high,
+        "confidence": uv.confidence.value,
+        "primary_method": uv.primary_method,
+        "price_per_sqft_used": uv.price_per_sqft_used,
+        "valuation_notes": uv.valuation_notes,
     }

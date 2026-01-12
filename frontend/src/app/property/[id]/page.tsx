@@ -9,8 +9,10 @@ import { Input } from '@/components/ui/input';
 import {
   PropertyDetail,
   RecalculatedAnalysis,
+  GDVReport,
   getPropertyDetail,
   updateManualInput,
+  generateGDVReport,
   formatPrice,
   getScoreColor,
 } from '@/lib/api';
@@ -22,8 +24,10 @@ export default function PropertyDetailPage() {
 
   const [property, setProperty] = useState<PropertyDetail | null>(null);
   const [analysis, setAnalysis] = useState<RecalculatedAnalysis | null>(null);
+  const [gdvReport, setGdvReport] = useState<GDVReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Form state
@@ -73,6 +77,25 @@ export default function PropertyDetailPage() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleGenerateGDVReport() {
+    if (!property) return;
+
+    try {
+      setGeneratingReport(true);
+      setError(null);
+
+      const report = await generateGDVReport(propertyId, {
+        title_number: titleNumber || undefined,
+      });
+      setGdvReport(report);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate GDV report');
+      console.error(err);
+    } finally {
+      setGeneratingReport(false);
     }
   }
 
@@ -500,6 +523,193 @@ export default function PropertyDetailPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* GDV Report Section */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Lender-Grade GDV Report</CardTitle>
+            <CardDescription>
+              Generate a comprehensive GDV report with Land Registry comparables and EPC data for lender presentations
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Data Sources:</strong> HM Land Registry Price Paid Data, PropertyData.co.uk AVM, UK House Price Index, EPC Register
+              </p>
+            </div>
+
+            <Button
+              onClick={handleGenerateGDVReport}
+              disabled={generatingReport}
+              className="w-full"
+              variant="outline"
+            >
+              {generatingReport ? 'Generating Report...' : 'Generate GDV Report'}
+            </Button>
+
+            {gdvReport && (
+              <div className="space-y-4 mt-4">
+                {/* GDV Summary */}
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <p className="font-semibold text-green-800">GDV Summary</p>
+                      <p className="text-xs text-green-600">{gdvReport.data_freshness}</p>
+                    </div>
+                    <Badge variant={gdvReport.gdv_confidence === 'high' ? 'default' : gdvReport.gdv_confidence === 'medium' ? 'secondary' : 'outline'}>
+                      {gdvReport.gdv_confidence.toUpperCase()} Confidence
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-xs text-gray-500">Total GDV</p>
+                      <p className="text-xl font-bold text-green-700">{formatPrice(gdvReport.total_gdv)}</p>
+                      <p className="text-xs text-gray-400">
+                        {formatPrice(gdvReport.gdv_range_low)} - {formatPrice(gdvReport.gdv_range_high)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Asking Price</p>
+                      <p className="font-semibold">{formatPrice(gdvReport.asking_price)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Gross Uplift</p>
+                      <p className="font-semibold text-green-600">{formatPrice(gdvReport.gross_uplift)}</p>
+                      <p className="text-xs text-gray-400">{gdvReport.gross_uplift_percent}%</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Net Uplift</p>
+                      <p className="font-semibold text-green-600">{formatPrice(gdvReport.net_uplift)}</p>
+                      <p className="text-xs text-gray-400">{gdvReport.net_uplift_percent}%</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Unit Valuations */}
+                <div className="p-4 bg-gray-50 border rounded-lg">
+                  <p className="font-semibold mb-3">Unit-by-Unit Valuations</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b">
+                          <th className="pb-2">Unit</th>
+                          <th className="pb-2">Beds</th>
+                          <th className="pb-2 text-right">Value</th>
+                          <th className="pb-2 text-right">Range</th>
+                          <th className="pb-2 text-center">Confidence</th>
+                          <th className="pb-2">Method</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gdvReport.unit_valuations.map((unit, i) => (
+                          <tr key={i} className="border-b border-gray-100">
+                            <td className="py-2 font-medium">{unit.unit_identifier}</td>
+                            <td className="py-2">{unit.beds || '-'}</td>
+                            <td className="py-2 text-right font-semibold">{formatPrice(unit.estimated_value)}</td>
+                            <td className="py-2 text-right text-xs text-gray-500">
+                              {formatPrice(unit.value_range_low)} - {formatPrice(unit.value_range_high)}
+                            </td>
+                            <td className="py-2 text-center">
+                              <Badge variant={unit.confidence === 'high' ? 'default' : unit.confidence === 'medium' ? 'secondary' : 'outline'} className="text-xs">
+                                {unit.confidence}
+                              </Badge>
+                            </td>
+                            <td className="py-2 text-xs text-gray-500">{unit.primary_method}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Costs & Net Profit */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                    <p className="font-semibold text-orange-800 mb-2">Title Split Costs</p>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span>Base costs</span>
+                        <span>{formatPrice(gdvReport.title_split_costs)}</span>
+                      </div>
+                      {gdvReport.refurbishment_budget && (
+                        <div className="flex justify-between">
+                          <span>Refurbishment</span>
+                          <span>{formatPrice(gdvReport.refurbishment_budget)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-semibold pt-1 border-t border-orange-200">
+                        <span>Total</span>
+                        <span>{formatPrice(gdvReport.total_costs)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-4 bg-green-100 border border-green-300 rounded-lg">
+                    <p className="font-semibold text-green-800 mb-2">Net Profit Analysis</p>
+                    <div className="text-center">
+                      <p className="text-3xl font-bold text-green-700">{formatPrice(gdvReport.net_profit_per_unit)}</p>
+                      <p className="text-sm text-green-600">per unit</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Total: {formatPrice(gdvReport.net_uplift)} ({gdvReport.net_uplift_percent}% return)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Comparables Summary */}
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="font-semibold text-blue-800 mb-2">Comparable Evidence</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-gray-500">Total Comparables</p>
+                      <p className="font-semibold">{gdvReport.comparables_summary.count}</p>
+                    </div>
+                    {gdvReport.comparables_summary.price_range && (
+                      <div>
+                        <p className="text-xs text-gray-500">Price Range</p>
+                        <p className="font-semibold">{gdvReport.comparables_summary.price_range}</p>
+                      </div>
+                    )}
+                    {gdvReport.comparables_summary.average && (
+                      <div>
+                        <p className="text-xs text-gray-500">Average</p>
+                        <p className="font-semibold">{formatPrice(gdvReport.comparables_summary.average)}</p>
+                      </div>
+                    )}
+                    {gdvReport.comparables_summary.median && (
+                      <div>
+                        <p className="text-xs text-gray-500">Median</p>
+                        <p className="font-semibold">{formatPrice(gdvReport.comparables_summary.median)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Confidence Statement */}
+                <div className="p-4 bg-gray-100 border rounded-lg">
+                  <p className="font-semibold mb-2">Confidence Statement</p>
+                  <p className="text-sm text-gray-600 whitespace-pre-line">{gdvReport.confidence_statement}</p>
+                </div>
+
+                {/* Limitations */}
+                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="font-semibold text-yellow-800 mb-2">Limitations & Caveats</p>
+                  <ul className="text-sm text-yellow-700 space-y-1">
+                    {gdvReport.limitations.map((limitation, i) => (
+                      <li key={i}>- {limitation}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Data Sources */}
+                <div className="text-xs text-gray-500">
+                  <p><strong>Data Sources:</strong> {gdvReport.data_sources.join(', ')}</p>
+                  <p><strong>Report Date:</strong> {new Date(gdvReport.report_date).toLocaleString()}</p>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </main>
     </div>
   );
