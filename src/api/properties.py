@@ -195,6 +195,7 @@ async def update_manual_input(property_id: UUID, data: ManualInputUpdate):
 
         await session.commit()
         await session.refresh(manual_input)
+        await session.refresh(property)  # Refresh property to ensure postcode/city are persisted
 
         # Calculate impact and update recommendation
         analysis = await _calculate_impact(property, manual_input)

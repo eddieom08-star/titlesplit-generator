@@ -74,22 +74,46 @@ async def analyze_url(request: AnalyzeRequest):
         if not property_data:
             raise HTTPException(status_code=400, detail="Could not extract property data from URL")
 
-        # Create temporary property for screening
-        temp_property = Property(
-            id=uuid4(),
-            source="manual",
-            source_id=f"manual-{uuid4().hex[:8]}",
-            source_url=url,
-            title=property_data.get("title", "Unknown Property"),
-            asking_price=property_data.get("price", 0),
-            address_line1=property_data.get("address", ""),
-            city=property_data.get("city", ""),
-            postcode=property_data.get("postcode", ""),
-            estimated_units=property_data.get("units"),
-            tenure=property_data.get("tenure", "unknown"),
-            status="pending",
-            first_seen=datetime.utcnow(),
-        )
+        # Check if property with this URL already exists
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import select
+            result = await session.execute(
+                select(Property).where(Property.source_url == url)
+            )
+            existing_property = result.scalar_one_or_none()
+
+        if existing_property:
+            # Update existing property with fresh data
+            temp_property = existing_property
+            temp_property.title = property_data.get("title", temp_property.title)
+            temp_property.asking_price = property_data.get("price", temp_property.asking_price)
+            temp_property.address_line1 = property_data.get("address", temp_property.address_line1)
+            if property_data.get("city"):
+                temp_property.city = property_data.get("city")
+            if property_data.get("postcode"):
+                temp_property.postcode = property_data.get("postcode")
+            if property_data.get("units"):
+                temp_property.estimated_units = property_data.get("units")
+            if property_data.get("tenure") and property_data.get("tenure") != "unknown":
+                temp_property.tenure = property_data.get("tenure")
+            logger.info("Updating existing property", id=str(temp_property.id), url=url)
+        else:
+            # Create new property
+            temp_property = Property(
+                id=uuid4(),
+                source="manual",
+                source_id=f"manual-{uuid4().hex[:8]}",
+                source_url=url,
+                title=property_data.get("title", "Unknown Property"),
+                asking_price=property_data.get("price", 0),
+                address_line1=property_data.get("address", ""),
+                city=property_data.get("city", ""),
+                postcode=property_data.get("postcode", ""),
+                estimated_units=property_data.get("units"),
+                tenure=property_data.get("tenure", "unknown"),
+                status="pending",
+                first_seen=datetime.utcnow(),
+            )
 
         if temp_property.estimated_units and temp_property.estimated_units > 0:
             temp_property.price_per_unit = temp_property.asking_price // temp_property.estimated_units
@@ -114,7 +138,7 @@ async def analyze_url(request: AnalyzeRequest):
         else:
             recommendation = "decline"
 
-        # Always save analyzed properties to database
+        # Save or update property in database
         async with AsyncSessionLocal() as session:
             temp_property.opportunity_score = screening.score
             if screening.passes:
@@ -122,9 +146,17 @@ async def analyze_url(request: AnalyzeRequest):
             else:
                 temp_property.status = "rejected"
                 temp_property.rejection_reasons = {"screening_rejections": screening.rejections}
-            session.add(temp_property)
+
+            if existing_property:
+                # Merge the detached object back into session
+                temp_property = await session.merge(temp_property)
+                logger.info("Updated existing property", id=str(temp_property.id), passes=screening.passes)
+            else:
+                session.add(temp_property)
+                logger.info("Created new property", id=str(temp_property.id), passes=screening.passes)
+
             await session.commit()
-            logger.info("Saved property from manual analysis", id=str(temp_property.id), passes=screening.passes)
+            await session.refresh(temp_property)
 
         return AnalyzeResponse(
             id=str(temp_property.id),
