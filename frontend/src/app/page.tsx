@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Opportunity, AnalysisResult, getOpportunities, formatPrice, getScoreColor, triggerScrape, seedDemoData, analyzeUrl } from '@/lib/api';
+import { Opportunity, AnalysisResult, ValuationResult, getOpportunities, formatPrice, getScoreColor, triggerScrape, seedDemoData, analyzeUrl, getValuation } from '@/lib/api';
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -18,6 +18,10 @@ export default function Dashboard() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [manualUnits, setManualUnits] = useState<string>('');
+  const [manualPostcode, setManualPostcode] = useState<string>('');
+  const [valuationResult, setValuationResult] = useState<ValuationResult | null>(null);
+  const [valuating, setValuating] = useState(false);
 
   useEffect(() => {
     loadOpportunities();
@@ -76,8 +80,12 @@ export default function Dashboard() {
       setAnalyzing(true);
       setAnalysisError(null);
       setAnalysisResult(null);
+      setValuationResult(null);
       const result = await analyzeUrl(urlInput.trim());
       setAnalysisResult(result);
+      // Pre-fill manual fields
+      setManualUnits(result.estimated_units?.toString() || '');
+      setManualPostcode(result.postcode || '');
       // Refresh opportunities list to include the new one
       await loadOpportunities();
     } catch (err) {
@@ -85,6 +93,32 @@ export default function Dashboard() {
       console.error(err);
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function handleGetValuation() {
+    if (!analysisResult || !manualUnits || !manualPostcode) return;
+
+    const units = parseInt(manualUnits, 10);
+    if (isNaN(units) || units < 1) {
+      setAnalysisError('Please enter a valid number of units');
+      return;
+    }
+
+    try {
+      setValuating(true);
+      setAnalysisError(null);
+      const result = await getValuation(
+        manualPostcode,
+        analysisResult.price,
+        units
+      );
+      setValuationResult(result);
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : 'Valuation failed');
+      console.error(err);
+    } finally {
+      setValuating(false);
     }
   }
 
@@ -247,6 +281,82 @@ export default function Dashboard() {
                   </ul>
                 </div>
 
+                {/* Manual Input for PropertyData Valuation */}
+                <div className="mt-4 pt-4 border-t">
+                  <p className="text-sm font-medium mb-3">Get PropertyData Valuation</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                    <div>
+                      <label className="text-xs text-gray-500">Units</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="20"
+                        placeholder="e.g., 3"
+                        value={manualUnits}
+                        onChange={(e) => setManualUnits(e.target.value)}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">Postcode</label>
+                      <Input
+                        type="text"
+                        placeholder="e.g., PR8 3DN"
+                        value={manualPostcode}
+                        onChange={(e) => setManualPostcode(e.target.value)}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        onClick={handleGetValuation}
+                        disabled={valuating || !manualUnits || !manualPostcode}
+                        className="w-full"
+                      >
+                        {valuating ? 'Getting...' : 'Get Valuation'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {valuationResult && valuationResult.status === 'success' && (
+                    <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="font-semibold text-green-800">PropertyData Valuation</span>
+                        <Badge variant={valuationResult.recommendation === 'proceed' ? 'default' : valuationResult.recommendation === 'review' ? 'secondary' : 'destructive'}>
+                          {valuationResult.recommendation?.toUpperCase()}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-gray-500">Unit Value</p>
+                          <p className="font-semibold">{valuationResult.estimated_unit_value ? formatPrice(valuationResult.estimated_unit_value) : 'N/A'}</p>
+                          <p className="text-xs text-gray-400">{valuationResult.unit_value_confidence} confidence</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Total Separated</p>
+                          <p className="font-semibold">{valuationResult.total_separated_value ? formatPrice(valuationResult.total_separated_value) : 'N/A'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Gross Uplift</p>
+                          <p className="font-semibold text-green-600">{valuationResult.gross_uplift ? formatPrice(valuationResult.gross_uplift) : 'N/A'}</p>
+                          <p className="text-xs text-gray-400">{valuationResult.gross_uplift_percent}%</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Net Per Unit</p>
+                          <p className="font-semibold text-green-600">{valuationResult.net_per_unit ? formatPrice(valuationResult.net_per_unit) : 'N/A'}</p>
+                          <p className="text-xs text-gray-400">{valuationResult.meets_threshold ? '✓ Above £2k threshold' : '✗ Below threshold'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {valuationResult && valuationResult.status !== 'success' && (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                      {valuationResult.message || 'Could not get valuation data'}
+                    </div>
+                  )}
+                </div>
+
                 <div className="mt-4 pt-4 border-t flex justify-between items-center">
                   <a
                     href={analysisResult.source_url}
@@ -261,7 +371,10 @@ export default function Dashboard() {
                     size="sm"
                     onClick={() => {
                       setAnalysisResult(null);
+                      setValuationResult(null);
                       setUrlInput('');
+                      setManualUnits('');
+                      setManualPostcode('');
                     }}
                   >
                     Clear

@@ -130,3 +130,45 @@ export async function analyzeUrl(url: string): Promise<AnalysisResult> {
   }
   return res.json();
 }
+
+export interface ValuationResult {
+  status: string;
+  asking_price: number;
+  num_units: number;
+  estimated_unit_value: number | null;
+  unit_value_confidence: string | null;
+  total_separated_value: number | null;
+  gross_uplift: number | null;
+  gross_uplift_percent: number | null;
+  estimated_costs: number | null;
+  net_uplift: number | null;
+  net_per_unit: number | null;
+  meets_threshold: boolean | null;
+  recommendation: string | null;
+  message: string | null;
+}
+
+export async function getValuation(
+  postcode: string,
+  askingPrice: number,
+  numUnits: number,
+  avgBedrooms: number = 2
+): Promise<ValuationResult> {
+  const res = await fetch(`${API_URL}/api/analyze/valuation`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      postcode,
+      asking_price: askingPrice,
+      num_units: numUnits,
+      avg_bedrooms: avgBedrooms,
+    }),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Valuation failed' }));
+    throw new Error(error.detail || 'Failed to get valuation');
+  }
+  return res.json();
+}
