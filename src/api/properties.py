@@ -737,3 +737,70 @@ def _serialize_unit_valuation(uv: UnitValuation) -> dict:
         "price_per_sqft_used": uv.price_per_sqft_used,
         "valuation_notes": uv.valuation_notes,
     }
+
+
+# ============================================================
+# Archive/Restore Endpoints
+# ============================================================
+
+@router.post("/{property_id}/archive")
+async def archive_property(property_id: UUID):
+    """Archive a property (soft delete)."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Property).where(Property.id == property_id)
+        )
+        property = result.scalar_one_or_none()
+
+        if not property:
+            raise HTTPException(status_code=404, detail="Property not found")
+
+        property.archived = True
+        await session.commit()
+
+        return {"status": "archived", "property_id": str(property_id)}
+
+
+@router.post("/{property_id}/restore")
+async def restore_property(property_id: UUID):
+    """Restore an archived property."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Property).where(Property.id == property_id)
+        )
+        property = result.scalar_one_or_none()
+
+        if not property:
+            raise HTTPException(status_code=404, detail="Property not found")
+
+        property.archived = False
+        await session.commit()
+
+        return {"status": "restored", "property_id": str(property_id)}
+
+
+@router.delete("/{property_id}")
+async def delete_property(property_id: UUID, permanent: bool = False):
+    """
+    Delete a property.
+
+    By default, performs soft delete (archive).
+    Use permanent=true for hard delete.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Property).where(Property.id == property_id)
+        )
+        property = result.scalar_one_or_none()
+
+        if not property:
+            raise HTTPException(status_code=404, detail="Property not found")
+
+        if permanent:
+            await session.delete(property)
+            await session.commit()
+            return {"status": "deleted", "property_id": str(property_id)}
+        else:
+            property.archived = True
+            await session.commit()
+            return {"status": "archived", "property_id": str(property_id)}

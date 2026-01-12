@@ -60,6 +60,7 @@ class Property(Base):
     # Status
     status: Mapped[str] = mapped_column(String(50), default="new", index=True)  # new, analysing, opportunity, rejected, contacted
     rejection_reasons: Mapped[Optional[dict]] = mapped_column(JSON)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     # Timestamps
     listed_date: Mapped[Optional[datetime]] = mapped_column(DateTime)

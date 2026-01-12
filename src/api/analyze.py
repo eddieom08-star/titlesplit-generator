@@ -114,14 +114,17 @@ async def analyze_url(request: AnalyzeRequest):
         else:
             recommendation = "decline"
 
-        # Save to database if it passes basic checks
-        if screening.passes:
-            async with AsyncSessionLocal() as session:
-                temp_property.opportunity_score = screening.score
+        # Always save analyzed properties to database
+        async with AsyncSessionLocal() as session:
+            temp_property.opportunity_score = screening.score
+            if screening.passes:
                 temp_property.status = "pending_enrichment"
-                session.add(temp_property)
-                await session.commit()
-                logger.info("Saved property from manual analysis", id=str(temp_property.id))
+            else:
+                temp_property.status = "rejected"
+                temp_property.rejection_reasons = {"screening_rejections": screening.rejections}
+            session.add(temp_property)
+            await session.commit()
+            logger.info("Saved property from manual analysis", id=str(temp_property.id), passes=screening.passes)
 
         return AnalyzeResponse(
             id=str(temp_property.id),

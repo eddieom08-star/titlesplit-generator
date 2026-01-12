@@ -22,8 +22,31 @@ export interface Opportunity {
   images: string[];
 }
 
-export async function getOpportunities(): Promise<Opportunity[]> {
-  const res = await fetch(`${API_URL}/api/opportunities?min_score=0`, {
+export interface OpportunityFilters {
+  minScore?: number;
+  maxPrice?: number;
+  minUnits?: number;
+  maxUnits?: number;
+  cities?: string;
+  tenure?: string;
+  status?: string;
+  includeArchived?: boolean;
+  sortBy?: 'score' | 'price' | 'date' | 'uplift';
+}
+
+export async function getOpportunities(filters: OpportunityFilters = {}): Promise<Opportunity[]> {
+  const params = new URLSearchParams();
+  params.set('min_score', String(filters.minScore ?? 0));
+  if (filters.maxPrice) params.set('max_price', String(filters.maxPrice));
+  if (filters.minUnits) params.set('min_units', String(filters.minUnits));
+  if (filters.maxUnits) params.set('max_units', String(filters.maxUnits));
+  if (filters.cities) params.set('cities', filters.cities);
+  if (filters.tenure) params.set('tenure', filters.tenure);
+  if (filters.status) params.set('status', filters.status);
+  if (filters.includeArchived) params.set('include_archived', 'true');
+  if (filters.sortBy) params.set('sort_by', filters.sortBy);
+
+  const res = await fetch(`${API_URL}/api/opportunities?${params.toString()}`, {
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -92,12 +115,42 @@ export async function triggerEnrichment(batchSize: number = 10): Promise<{ statu
   return res.json();
 }
 
-export async function seedDemoData(): Promise<{ status: string; count: number }> {
-  const res = await fetch(`${API_URL}/api/scraper/seed`, {
+export async function clearDemoData(): Promise<{ status: string; count: number }> {
+  const res = await fetch(`${API_URL}/api/scraper/demo`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to clear demo data');
+  }
+  return res.json();
+}
+
+export async function archiveProperty(propertyId: string): Promise<{ status: string; property_id: string }> {
+  const res = await fetch(`${API_URL}/api/properties/${propertyId}/archive`, {
     method: 'POST',
   });
   if (!res.ok) {
-    throw new Error('Failed to seed demo data');
+    throw new Error('Failed to archive property');
+  }
+  return res.json();
+}
+
+export async function restoreProperty(propertyId: string): Promise<{ status: string; property_id: string }> {
+  const res = await fetch(`${API_URL}/api/properties/${propertyId}/restore`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to restore property');
+  }
+  return res.json();
+}
+
+export async function deleteProperty(propertyId: string, permanent: boolean = false): Promise<{ status: string; property_id: string }> {
+  const res = await fetch(`${API_URL}/api/properties/${propertyId}?permanent=${permanent}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to delete property');
   }
   return res.json();
 }

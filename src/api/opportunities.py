@@ -39,6 +39,8 @@ async def list_opportunities(
     max_units: int = Query(default=10, le=50),
     cities: Optional[str] = Query(default=None, description="Comma-separated city names"),
     tenure: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None, description="Filter by status"),
+    include_archived: bool = Query(default=False, description="Include archived properties"),
     sort_by: str = Query(default="score", enum=["score", "price", "date", "uplift"]),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -54,8 +56,17 @@ async def list_opportunities(
         Property.opportunity_score >= min_score,
         Property.estimated_units >= min_units,
         Property.estimated_units <= max_units,
-        Property.status != "rejected",
     ]
+
+    # Filter archived unless explicitly included
+    if not include_archived:
+        conditions.append(Property.archived == False)
+
+    # Filter by status if provided, otherwise exclude rejected
+    if status:
+        conditions.append(Property.status == status)
+    else:
+        conditions.append(Property.status != "rejected")
 
     if max_price:
         conditions.append(Property.asking_price <= max_price)

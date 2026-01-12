@@ -6,7 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Opportunity, AnalysisResult, ValuationResult, getOpportunities, formatPrice, getScoreColor, triggerScrape, seedDemoData, analyzeUrl, getValuation } from '@/lib/api';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Opportunity, AnalysisResult, ValuationResult, OpportunityFilters, getOpportunities, formatPrice, getScoreColor, triggerScrape, clearDemoData, analyzeUrl, getValuation, archiveProperty } from '@/lib/api';
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -22,15 +23,22 @@ export default function Dashboard() {
   const [manualPostcode, setManualPostcode] = useState<string>('');
   const [valuationResult, setValuationResult] = useState<ValuationResult | null>(null);
   const [valuating, setValuating] = useState(false);
+  // Filters
+  const [filters, setFilters] = useState<OpportunityFilters>({
+    minScore: 0,
+    sortBy: 'score',
+    includeArchived: false,
+  });
+  const [archiving, setArchiving] = useState<string | null>(null);
 
   useEffect(() => {
     loadOpportunities();
-  }, []);
+  }, [filters]);
 
   async function loadOpportunities() {
     try {
       setLoading(true);
-      const data = await getOpportunities();
+      const data = await getOpportunities(filters);
       setOpportunities(data);
       setError(null);
     } catch (err) {
@@ -57,18 +65,30 @@ export default function Dashboard() {
     }
   }
 
-  async function handleSeedData() {
+  async function handleClearDemoData() {
     try {
       setScraping(true);
       setScrapeMessage(null);
-      const result = await seedDemoData();
-      setScrapeMessage(`Seeded ${result.count} demo properties`);
+      const result = await clearDemoData();
+      setScrapeMessage(`Cleared ${result.count} demo properties`);
       await loadOpportunities();
     } catch (err) {
-      setScrapeMessage('Failed to seed demo data');
+      setScrapeMessage('Failed to clear demo data');
       console.error(err);
     } finally {
       setScraping(false);
+    }
+  }
+
+  async function handleArchive(propertyId: string) {
+    try {
+      setArchiving(propertyId);
+      await archiveProperty(propertyId);
+      await loadOpportunities();
+    } catch (err) {
+      console.error('Failed to archive property', err);
+    } finally {
+      setArchiving(null);
     }
   }
 
@@ -146,20 +166,22 @@ export default function Dashboard() {
             </div>
             <div className="flex gap-2">
               <Button
-                onClick={handleSeedData}
+                onClick={handleClearDemoData}
                 disabled={scraping}
-                variant="default"
+                variant="outline"
+                size="sm"
               >
-                {scraping ? 'Loading...' : 'Load Demo Data'}
+                Clear Demo
               </Button>
               <Button
                 onClick={handleTriggerScrape}
                 disabled={scraping}
                 variant="outline"
+                size="sm"
               >
                 Run Scraper
               </Button>
-              <Button onClick={loadOpportunities} variant="outline">
+              <Button onClick={loadOpportunities} variant="outline" size="sm">
                 Refresh
               </Button>
             </div>
@@ -429,12 +451,111 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
+        {/* Filters */}
+        <Card className="mb-8">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg">Filters</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Min Score</label>
+                <Select
+                  value={String(filters.minScore ?? 0)}
+                  onValueChange={(value) => setFilters({ ...filters, minScore: parseInt(value) })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">All (0+)</SelectItem>
+                    <SelectItem value="50">50+</SelectItem>
+                    <SelectItem value="60">60+</SelectItem>
+                    <SelectItem value="70">70+</SelectItem>
+                    <SelectItem value="80">80+</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Tenure</label>
+                <Select
+                  value={filters.tenure || 'all'}
+                  onValueChange={(value) => setFilters({ ...filters, tenure: value === 'all' ? undefined : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="freehold">Freehold</SelectItem>
+                    <SelectItem value="leasehold">Leasehold</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Min Units</label>
+                <Select
+                  value={String(filters.minUnits ?? 2)}
+                  onValueChange={(value) => setFilters({ ...filters, minUnits: parseInt(value) })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1+</SelectItem>
+                    <SelectItem value="2">2+</SelectItem>
+                    <SelectItem value="3">3+</SelectItem>
+                    <SelectItem value="4">4+</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Sort By</label>
+                <Select
+                  value={filters.sortBy || 'score'}
+                  onValueChange={(value) => setFilters({ ...filters, sortBy: value as 'score' | 'price' | 'date' | 'uplift' })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="score">Score</SelectItem>
+                    <SelectItem value="price">Price</SelectItem>
+                    <SelectItem value="date">Date</SelectItem>
+                    <SelectItem value="uplift">Uplift</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={filters.includeArchived}
+                    onChange={(e) => setFilters({ ...filters, includeArchived: e.target.checked })}
+                    className="rounded"
+                  />
+                  Show Archived
+                </label>
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFilters({ minScore: 0, sortBy: 'score', includeArchived: false })}
+                >
+                  Reset Filters
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Opportunities Table */}
         <Card>
           <CardHeader>
             <CardTitle>Opportunities</CardTitle>
             <CardDescription>
-              Properties identified for potential title split
+              Properties identified for potential title split ({opportunities.length} found)
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -514,12 +635,23 @@ export default function Dashboard() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <a
-                            href={`/property/${opp.id}`}
-                            className="text-sm text-blue-600 hover:underline"
-                          >
-                            Details &rarr;
-                          </a>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={`/property/${opp.id}`}
+                              className="text-sm text-blue-600 hover:underline"
+                            >
+                              Details
+                            </a>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleArchive(opp.id)}
+                              disabled={archiving === opp.id}
+                              className="text-xs text-gray-400 hover:text-red-600"
+                            >
+                              {archiving === opp.id ? '...' : 'Archive'}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
