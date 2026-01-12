@@ -165,14 +165,15 @@ class LandRegistryClient:
         self,
         client: httpx.AsyncClient,
         postcode: str,
-        min_date: datetime,
+        min_date: datetime,  # Kept for signature compatibility but not used
         limit: int,
     ) -> list[ComparableSale]:
-        """Fetch sales without property type filter."""
+        """Fetch sales without property type filter OR date filter (last resort)."""
         try:
+            # NO date filter - get any historical sales, sorted by date
+            # Old sales are still useful when time-adjusted
             params = {
                 "propertyAddress.postcode": postcode,
-                "min-transactionDate": min_date.strftime("%Y-%m-%d"),
                 "_pageSize": str(limit),
                 "_sort": "-transactionDate",
             }
