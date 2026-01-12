@@ -163,6 +163,107 @@ export interface ValuationResult {
   comparable_sales: ComparableSale[] | null;
 }
 
+// Property Detail & Manual Inputs
+
+export interface ManualInput {
+  verified_tenure: string | null;
+  title_number: string | null;
+  is_single_title: boolean | null;
+  title_notes: string | null;
+  verified_units: number | null;
+  unit_breakdown: object[] | null;
+  planning_checked: boolean;
+  planning_constraints: Record<string, boolean> | null;
+  planning_notes: string | null;
+  hmo_license_required: boolean | null;
+  hmo_license_status: string | null;
+  site_visited: boolean;
+  condition_rating: string | null;
+  access_issues: string | null;
+  structural_concerns: string | null;
+  revised_asking_price: number | null;
+  additional_costs_identified: Record<string, number> | null;
+  deal_status: string;
+  blockers: object[] | null;
+}
+
+export interface PropertyDetail {
+  id: string;
+  source_url: string;
+  title: string;
+  asking_price: number;
+  city: string;
+  postcode: string;
+  estimated_units: number;
+  tenure: string;
+  tenure_confidence: number;
+  opportunity_score: number;
+  status: string;
+  first_seen: string;
+  manual_inputs: ManualInput | null;
+}
+
+export interface ImpactItem {
+  field: string;
+  impact_type: string;
+  score_adjustment: number;
+  message: string;
+}
+
+export interface RecalculatedAnalysis {
+  property_id: string;
+  original_score: number;
+  adjusted_score: number;
+  original_recommendation: string;
+  updated_recommendation: string;
+  impacts: ImpactItem[];
+  confidence_level: string;
+  valuation: ValuationResult | null;
+  cost_breakdown: Record<string, number>;
+  net_benefit_per_unit: number;
+  blockers: object[];
+  warnings: string[];
+  positives: string[];
+}
+
+export async function getPropertyDetail(id: string): Promise<PropertyDetail> {
+  const res = await fetch(`${API_URL}/api/properties/${id}`, {
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to fetch property');
+  }
+  return res.json();
+}
+
+export async function updateManualInput(
+  propertyId: string,
+  data: Partial<ManualInput>
+): Promise<RecalculatedAnalysis> {
+  const res = await fetch(`${API_URL}/api/properties/${propertyId}/manual`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Update failed' }));
+    throw new Error(error.detail || 'Failed to update manual input');
+  }
+  return res.json();
+}
+
+export async function recalculateAnalysis(propertyId: string): Promise<RecalculatedAnalysis> {
+  const res = await fetch(`${API_URL}/api/properties/${propertyId}/recalculate`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to recalculate');
+  }
+  return res.json();
+}
+
 export async function getValuation(
   postcode: string,
   askingPrice: number,

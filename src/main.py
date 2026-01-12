@@ -8,6 +8,7 @@ from src.database import init_db
 from src.api.opportunities import router as opportunities_router
 from src.api.scraper import router as scraper_router
 from src.api.analyze import router as analyze_router
+from src.api.properties import router as properties_router
 from src.tasks.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
@@ -65,3 +66,4 @@ async def root():
 app.include_router(opportunities_router, prefix="/api")
 app.include_router(scraper_router, prefix="/api")
 app.include_router(analyze_router, prefix="/api")
+app.include_router(properties_router, prefix="/api")

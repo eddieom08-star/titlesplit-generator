@@ -467,6 +467,7 @@ export default function Dashboard() {
                     <TableHead className="text-center">Score</TableHead>
                     <TableHead className="text-right">Est. Uplift</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -511,6 +512,14 @@ export default function Dashboard() {
                           <Badge variant={priorityVariant}>
                             {recommendationLabel}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <a
+                            href={`/property/${opp.id}`}
+                            className="text-sm text-blue-600 hover:underline"
+                          >
+                            Details &rarr;
+                          </a>
                         </TableCell>
                       </TableRow>
                     );

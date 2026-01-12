@@ -72,6 +72,7 @@ class Property(Base):
     unit_epcs: Mapped[list["UnitEPC"]] = relationship("UnitEPC", back_populates="property", cascade="all, delete-orphan")
     comparables: Mapped[list["Comparable"]] = relationship("Comparable", back_populates="property", cascade="all, delete-orphan")
     analyses: Mapped[list["Analysis"]] = relationship("Analysis", back_populates="property", cascade="all, delete-orphan")
+    manual_inputs: Mapped[list["ManualInput"]] = relationship("ManualInput", back_populates="property", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Property {self.address_line1}, {self.postcode} - £{self.asking_price:,}>"
@@ -130,6 +131,62 @@ class Comparable(Base):
 
     def __repr__(self) -> str:
         return f"<Comparable {self.address} - £{self.price:,}>"
+
+
+class ManualInput(Base):
+    """Manual verification data entered by user to improve analysis."""
+    __tablename__ = "manual_inputs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    property_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("properties.id"), nullable=False, index=True)
+
+    # Title Verification
+    verified_tenure: Mapped[Optional[str]] = mapped_column(String(50))  # freehold, leasehold
+    title_number: Mapped[Optional[str]] = mapped_column(String(50))
+    is_single_title: Mapped[Optional[bool]] = mapped_column(Boolean)
+    title_verified_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    title_notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Unit Verification
+    verified_units: Mapped[Optional[int]] = mapped_column(Integer)
+    unit_breakdown: Mapped[Optional[dict]] = mapped_column(JSON)  # [{beds: 2, sqft: 500, floor: 1}, ...]
+    units_verified_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Planning Status
+    planning_checked: Mapped[bool] = mapped_column(Boolean, default=False)
+    planning_applications: Mapped[Optional[dict]] = mapped_column(JSON)
+    planning_constraints: Mapped[Optional[dict]] = mapped_column(JSON)  # conservation, listed, article4
+    planning_notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # HMO/Licensing
+    hmo_license_required: Mapped[Optional[bool]] = mapped_column(Boolean)
+    hmo_license_status: Mapped[Optional[str]] = mapped_column(String(50))  # licensed, pending, not_required, unknown
+    additional_licensing: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    # Physical Inspection
+    site_visited: Mapped[bool] = mapped_column(Boolean, default=False)
+    site_visit_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    condition_rating: Mapped[Optional[str]] = mapped_column(String(20))  # excellent, good, fair, poor
+    access_issues: Mapped[Optional[str]] = mapped_column(Text)
+    structural_concerns: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Financial Adjustments
+    revised_asking_price: Mapped[Optional[int]] = mapped_column(Integer)
+    additional_costs_identified: Mapped[Optional[dict]] = mapped_column(JSON)
+    negotiation_notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Deal Blockers
+    blockers: Mapped[Optional[dict]] = mapped_column(JSON)  # [{type: "title", reason: "leasehold"}]
+    deal_status: Mapped[str] = mapped_column(String(50), default="active")  # active, blocked, passed, completed
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    property: Mapped["Property"] = relationship("Property", back_populates="manual_inputs")
+
+    def __repr__(self) -> str:
+        return f"<ManualInput property={self.property_id} status={self.deal_status}>"
 
 
 class Analysis(Base):
