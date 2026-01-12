@@ -18,6 +18,7 @@ from src.scrapers.extractors import (
     extract_postcode,
 )
 from src.analysis.screening import initial_screen
+from src.services.propertydata import PropertyDataClient, calculate_title_split_potential
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/analyze", tags=["analyze"])
@@ -407,4 +408,88 @@ async def fetch_generic(url: str) -> dict:
             "postcode": postcode,
             "units": units.value,
             "tenure": tenure.value,
+        }
+
+
+class ValuationRequest(BaseModel):
+    postcode: str
+    asking_price: int
+    num_units: int
+    avg_bedrooms: int = 2
+
+
+class ValuationResponse(BaseModel):
+    status: str
+    asking_price: int
+    num_units: int
+    estimated_unit_value: Optional[int] = None
+    unit_value_confidence: Optional[str] = None
+    total_separated_value: Optional[int] = None
+    gross_uplift: Optional[int] = None
+    gross_uplift_percent: Optional[float] = None
+    estimated_costs: Optional[int] = None
+    net_uplift: Optional[int] = None
+    net_per_unit: Optional[int] = None
+    meets_threshold: Optional[bool] = None
+    recommendation: Optional[str] = None
+    message: Optional[str] = None
+
+
+@router.post("/valuation", response_model=ValuationResponse)
+async def get_valuation(request: ValuationRequest):
+    """
+    Get PropertyData valuation for a title split opportunity.
+
+    Uses PropertyData API to estimate individual unit values
+    and calculate potential title split returns.
+    """
+    try:
+        result = await calculate_title_split_potential(
+            postcode=request.postcode,
+            asking_price=request.asking_price,
+            num_units=request.num_units,
+            avg_bedrooms=request.avg_bedrooms,
+        )
+        return ValuationResponse(**result)
+
+    except Exception as e:
+        logger.error("Valuation failed", error=str(e), postcode=request.postcode)
+        return ValuationResponse(
+            status="error",
+            asking_price=request.asking_price,
+            num_units=request.num_units,
+            message=str(e),
+        )
+
+
+class SoldPricesRequest(BaseModel):
+    postcode: str
+    property_type: str = "flat"
+
+
+@router.post("/sold-prices")
+async def get_sold_prices(request: SoldPricesRequest):
+    """
+    Get recent sold prices near a postcode.
+
+    Returns comparable sales data for the area.
+    """
+    try:
+        client = PropertyDataClient()
+        sold_prices = await client.get_sold_prices(
+            postcode=request.postcode,
+            property_type=request.property_type,
+        )
+        return {
+            "status": "success",
+            "postcode": request.postcode,
+            "sold_prices": sold_prices,
+        }
+
+    except Exception as e:
+        logger.error("Sold prices lookup failed", error=str(e))
+        return {
+            "status": "error",
+            "message": str(e),
+            "sold_prices": [],
         }
