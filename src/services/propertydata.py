@@ -349,6 +349,8 @@ async def calculate_title_split_potential(
     if not valuation or not valuation.estimated_value:
         return {
             "status": "insufficient_data",
+            "asking_price": asking_price,
+            "num_units": num_units,
             "message": "Could not retrieve valuation data for this postcode",
         }
 
