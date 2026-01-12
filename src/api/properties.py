@@ -24,6 +24,10 @@ router = APIRouter(prefix="/properties", tags=["properties"])
 
 class ManualInputUpdate(BaseModel):
     """Schema for updating manual verification data."""
+    # Property Core Data (updates Property model directly)
+    postcode: Optional[str] = None
+    city: Optional[str] = None
+
     # Title Verification
     verified_tenure: Optional[str] = None
     title_number: Optional[str] = None
@@ -169,6 +173,14 @@ async def update_manual_input(property_id: UUID, data: ManualInputUpdate):
 
         # Update fields from request
         update_data = data.model_dump(exclude_unset=True)
+
+        # Handle Property model fields separately
+        if "postcode" in update_data:
+            property.postcode = update_data.pop("postcode")
+        if "city" in update_data:
+            property.city = update_data.pop("city")
+
+        # Update ManualInput fields
         for field, value in update_data.items():
             if hasattr(manual_input, field):
                 setattr(manual_input, field, value)

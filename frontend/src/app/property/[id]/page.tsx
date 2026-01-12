@@ -31,6 +31,8 @@ export default function PropertyDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Form state
+  const [postcode, setPostcode] = useState<string>('');
+  const [city, setCity] = useState<string>('');
   const [verifiedTenure, setVerifiedTenure] = useState<string>('');
   const [titleNumber, setTitleNumber] = useState<string>('');
   const [isSingleTitle, setIsSingleTitle] = useState<string>('');
@@ -53,6 +55,10 @@ export default function PropertyDetailPage() {
       setLoading(true);
       const data = await getPropertyDetail(propertyId);
       setProperty(data);
+
+      // Pre-fill property core data
+      if (data.postcode) setPostcode(data.postcode);
+      if (data.city) setCity(data.city);
 
       // Pre-fill form with existing manual inputs
       if (data.manual_inputs) {
@@ -107,6 +113,10 @@ export default function PropertyDetailPage() {
       setError(null);
 
       const data: Record<string, unknown> = {};
+
+      // Property core data
+      if (postcode) data.postcode = postcode;
+      if (city) data.city = city;
 
       if (verifiedTenure) data.verified_tenure = verifiedTenure;
       if (titleNumber) data.title_number = titleNumber;
@@ -229,6 +239,34 @@ export default function PropertyDetailPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Location Section - for missing data */}
+            {(!property.postcode || !property.city) && (
+              <div className="border-b pb-4 bg-yellow-50 -mx-6 px-6 py-4 -mt-6 mb-4">
+                <h3 className="font-semibold mb-3 text-yellow-800">Missing Location Data</h3>
+                <p className="text-sm text-yellow-700 mb-3">
+                  Location data is required for GDV reports and valuations.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm text-gray-600 block mb-1">Postcode</label>
+                    <Input
+                      placeholder="e.g., PR8 1LY"
+                      value={postcode}
+                      onChange={(e) => setPostcode(e.target.value.toUpperCase())}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-600 block mb-1">City/Town</label>
+                    <Input
+                      placeholder="e.g., Southport"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Title/Tenure Section */}
             <div className="border-b pb-4">
               <h3 className="font-semibold mb-3">Title & Tenure</h3>
