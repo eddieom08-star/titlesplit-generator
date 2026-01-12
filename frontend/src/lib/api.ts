@@ -101,3 +101,32 @@ export async function seedDemoData(): Promise<{ status: string; count: number }>
   }
   return res.json();
 }
+
+export interface AnalysisResult {
+  id: string;
+  title: string;
+  price: number;
+  city: string;
+  postcode: string;
+  estimated_units: number | null;
+  tenure: string;
+  opportunity_score: number;
+  recommendation: string;
+  analysis_notes: string[];
+  source_url: string;
+}
+
+export async function analyzeUrl(url: string): Promise<AnalysisResult> {
+  const res = await fetch(`${API_URL}/api/analyze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Analysis failed' }));
+    throw new Error(error.detail || 'Failed to analyze URL');
+  }
+  return res.json();
+}
