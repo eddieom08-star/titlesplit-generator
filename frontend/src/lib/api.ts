@@ -422,16 +422,32 @@ export async function generateGDVReport(
   propertyId: string,
   request: GDVReportRequest = {}
 ): Promise<GDVReport> {
-  const res = await fetch(`${API_URL}/api/properties/${propertyId}/gdv-report`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
-  });
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: 'GDV report generation failed' }));
-    throw new Error(error.detail || 'Failed to generate GDV report');
+  // Add 90 second timeout (Render cold starts + Land Registry API calls)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90000);
+
+  try {
+    const res = await fetch(`${API_URL}/api/properties/${propertyId}/gdv-report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'GDV report generation failed' }));
+      throw new Error(error.detail || 'Failed to generate GDV report');
+    }
+    return res.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Request timed out - please try again (server may be starting up)');
+    }
+    throw err;
   }
-  return res.json();
 }
