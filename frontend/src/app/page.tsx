@@ -5,12 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Opportunity, getOpportunities, formatPrice, getScoreColor, getStatusBadge } from '@/lib/api';
+import { Opportunity, getOpportunities, formatPrice, getScoreColor, getStatusBadge, triggerScrape } from '@/lib/api';
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scraping, setScraping] = useState(false);
+  const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     loadOpportunities();
@@ -27,6 +29,22 @@ export default function Dashboard() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleTriggerScrape() {
+    try {
+      setScraping(true);
+      setScrapeMessage(null);
+      const result = await triggerScrape();
+      setScrapeMessage(result.message);
+      // Refresh opportunities after a short delay to allow scraping to start
+      setTimeout(() => loadOpportunities(), 5000);
+    } catch (err) {
+      setScrapeMessage('Failed to trigger scrape');
+      console.error(err);
+    } finally {
+      setScraping(false);
     }
   }
 
@@ -48,10 +66,22 @@ export default function Dashboard() {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Title Split Finder</h1>
               <p className="text-sm text-gray-500">UK Property Investment Opportunities</p>
+              {scrapeMessage && (
+                <p className="text-xs text-green-600 mt-1">{scrapeMessage}</p>
+              )}
             </div>
-            <Button onClick={loadOpportunities} variant="outline">
-              Refresh
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleTriggerScrape}
+                disabled={scraping}
+                variant="default"
+              >
+                {scraping ? 'Starting...' : 'Run Scraper'}
+              </Button>
+              <Button onClick={loadOpportunities} variant="outline">
+                Refresh
+              </Button>
+            </div>
           </div>
         </div>
       </header>

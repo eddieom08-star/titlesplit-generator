@@ -65,3 +65,23 @@ export function getStatusBadge(status: string): { variant: 'default' | 'secondar
       return { variant: 'secondary', label: status };
   }
 }
+
+export async function triggerScrape(): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_URL}/api/scraper/trigger`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to trigger scrape');
+  }
+  return res.json();
+}
+
+export async function triggerEnrichment(batchSize: number = 10): Promise<{ status: string; batch_size: number }> {
+  const res = await fetch(`${API_URL}/api/scraper/enrich?batch_size=${batchSize}`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to trigger enrichment');
+  }
+  return res.json();
+}
