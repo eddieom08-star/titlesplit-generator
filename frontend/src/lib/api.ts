@@ -2,18 +2,24 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://titlesplit-api.onren
 
 export interface Opportunity {
   id: string;
+  source_url: string;
   title: string;
-  address_line1: string;
+  price: number;
   city: string;
   postcode: string;
-  asking_price: number;
   estimated_units: number;
-  tenure: string;
+  price_per_unit: number;
   opportunity_score: number;
-  title_split_score: number;
-  estimated_gross_uplift: number | null;
-  status: string;
-  source_url: string;
+  tenure: string;
+  tenure_confidence: number;
+  avg_epc: string | null;
+  refurb_needed: boolean;
+  estimated_gross_uplift_percent: number | null;
+  estimated_net_benefit_per_unit: number | null;
+  recommendation: string;
+  priority: string;
+  first_seen: string;
+  images: string[];
 }
 
 export async function getOpportunities(): Promise<Opportunity[]> {

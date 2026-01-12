@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Opportunity, getOpportunities, formatPrice, getScoreColor, getStatusBadge, triggerScrape, seedDemoData } from '@/lib/api';
+import { Opportunity, getOpportunities, formatPrice, getScoreColor, triggerScrape, seedDemoData } from '@/lib/api';
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -65,8 +65,8 @@ export default function Dashboard() {
 
   const stats = {
     total: opportunities.length,
-    hot: opportunities.filter(o => o.status === 'hot').length,
-    totalUplift: opportunities.reduce((sum, o) => sum + (o.estimated_gross_uplift || 0), 0),
+    highPriority: opportunities.filter(o => o.priority === 'high').length,
+    totalNetBenefit: opportunities.reduce((sum, o) => sum + (o.estimated_net_benefit_per_unit || 0) * o.estimated_units, 0),
     avgScore: opportunities.length > 0
       ? Math.round(opportunities.reduce((sum, o) => sum + o.opportunity_score, 0) / opportunities.length)
       : 0,
@@ -119,14 +119,14 @@ export default function Dashboard() {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription>Hot Leads</CardDescription>
-              <CardTitle className="text-3xl text-red-600">{stats.hot}</CardTitle>
+              <CardDescription>High Priority</CardDescription>
+              <CardTitle className="text-3xl text-red-600">{stats.highPriority}</CardTitle>
             </CardHeader>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription>Total Potential Uplift</CardDescription>
-              <CardTitle className="text-3xl text-green-600">{formatPrice(stats.totalUplift)}</CardTitle>
+              <CardDescription>Est. Net Benefit</CardDescription>
+              <CardTitle className="text-3xl text-green-600">{formatPrice(stats.totalNetBenefit)}</CardTitle>
             </CardHeader>
           </Card>
           <Card>
@@ -179,7 +179,8 @@ export default function Dashboard() {
                 </TableHeader>
                 <TableBody>
                   {opportunities.map((opp) => {
-                    const statusBadge = getStatusBadge(opp.status);
+                    const priorityVariant = opp.priority === 'high' ? 'destructive' : opp.priority === 'medium' ? 'default' : 'secondary';
+                    const recommendationLabel = opp.recommendation === 'proceed' ? 'Proceed' : opp.recommendation === 'review' ? 'Review' : 'Decline';
                     return (
                       <TableRow key={opp.id}>
                         <TableCell className="font-medium max-w-xs truncate">
@@ -197,7 +198,7 @@ export default function Dashboard() {
                           <div className="text-xs text-gray-500">{opp.postcode}</div>
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          {formatPrice(opp.asking_price)}
+                          {formatPrice(opp.price)}
                         </TableCell>
                         <TableCell className="text-center">
                           {opp.estimated_units}
@@ -212,11 +213,11 @@ export default function Dashboard() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right text-green-600 font-medium">
-                          {opp.estimated_gross_uplift ? formatPrice(opp.estimated_gross_uplift) : '-'}
+                          {opp.estimated_gross_uplift_percent ? `${opp.estimated_gross_uplift_percent}%` : '-'}
                         </TableCell>
                         <TableCell>
-                          <Badge variant={statusBadge.variant}>
-                            {statusBadge.label}
+                          <Badge variant={priorityVariant}>
+                            {recommendationLabel}
                           </Badge>
                         </TableCell>
                       </TableRow>
