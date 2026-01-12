@@ -85,7 +85,7 @@ class PropertyDataClient:
         internal_area: Optional[int] = None,
     ) -> Optional[PropertyValuation]:
         """
-        Get property valuation estimate.
+        Get property valuation estimate using sold prices data.
 
         Args:
             postcode: UK postcode
@@ -94,30 +94,60 @@ class PropertyDataClient:
             internal_area: Internal area in sqft (optional)
         """
         try:
+            # Use sold-prices endpoint as primary valuation source
             params = {
                 "postcode": postcode.replace(" ", ""),
-                "property_type": property_type,
             }
-            if bedrooms:
-                params["bedrooms"] = bedrooms
-            if internal_area:
-                params["internal_area"] = internal_area
 
-            data = await self._request("valuation-sale", params)
+            data = await self._request("sold-prices", params)
 
-            result = data.get("result", {})
+            if data.get("status") != "success":
+                logger.warning("Sold prices lookup returned non-success", postcode=postcode)
+                return None
+
+            result = data.get("data", {})
+            raw_data = result.get("raw_data", [])
+
+            # Filter for flats only if property_type is flat
+            if property_type == "flat":
+                flat_sales = [s for s in raw_data if s.get("type") == "flat"]
+                if flat_sales:
+                    prices = [s["price"] for s in flat_sales]
+                    avg_price = sum(prices) // len(prices)
+                    prices_sorted = sorted(prices)
+                    low_price = prices_sorted[0] if prices_sorted else None
+                    high_price = prices_sorted[-1] if prices_sorted else None
+                else:
+                    avg_price = result.get("average")
+                    range_70 = result.get("70pc_range", [None, None])
+                    low_price = range_70[0]
+                    high_price = range_70[1]
+            else:
+                avg_price = result.get("average")
+                range_70 = result.get("70pc_range", [None, None])
+                low_price = range_70[0]
+                high_price = range_70[1]
+
+            # Determine confidence based on data points
+            points = result.get("points_analysed", 0)
+            if points >= 20:
+                confidence = "high"
+            elif points >= 10:
+                confidence = "medium"
+            else:
+                confidence = "low"
 
             return PropertyValuation(
                 postcode=postcode,
                 property_type=property_type,
-                estimated_value=result.get("estimate"),
-                value_low=result.get("lower"),
-                value_high=result.get("upper"),
-                confidence=result.get("confidence", "low"),
+                estimated_value=avg_price,
+                value_low=low_price,
+                value_high=high_price,
+                confidence=confidence,
                 rental_estimate=None,
                 rental_low=None,
                 rental_high=None,
-                sold_prices_nearby=[],
+                sold_prices_nearby=raw_data[:10],
                 epc_rating=None,
                 planning_applications=[],
             )
