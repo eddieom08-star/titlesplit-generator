@@ -192,6 +192,33 @@ class PropertyDataClient:
             logger.error("Sold prices lookup failed", postcode=postcode, error=str(e))
             return []
 
+    async def get_sold_prices_per_sqf(
+        self,
+        postcode: str,
+        max_age_months: int = 18,
+    ) -> Optional[dict]:
+        """
+        Get sold prices with square footage data (from EPC matching).
+
+        Returns Land Registry data enriched with EPC sqft info.
+        """
+        try:
+            params = {
+                "postcode": postcode.replace(" ", ""),
+                "max_age": max_age_months,
+            }
+
+            data = await self._request("sold-prices-per-sqf", params)
+
+            if data.get("status") != "success":
+                return None
+
+            return data.get("data", {})
+
+        except Exception as e:
+            logger.error("Sold prices per sqf lookup failed", postcode=postcode, error=str(e))
+            return None
+
     async def get_rental_estimate(
         self,
         postcode: str,
@@ -356,7 +383,7 @@ async def calculate_title_split_potential(
     api_key: Optional[str] = None,
 ) -> dict:
     """
-    Calculate potential title split returns.
+    Calculate potential title split returns with comprehensive data.
 
     Args:
         postcode: Property postcode
@@ -365,11 +392,14 @@ async def calculate_title_split_potential(
         avg_bedrooms: Average bedrooms per unit
 
     Returns:
-        Dict with financial analysis
+        Dict with financial analysis, Land Registry data, and EPC info
     """
     client = PropertyDataClient(api_key)
 
-    # Get valuation for a typical unit
+    # Get sold prices with sqft data (includes EPC matching)
+    sold_prices_sqf = await client.get_sold_prices_per_sqf(postcode)
+
+    # Get basic sold prices as fallback
     valuation = await client.get_valuation(
         postcode=postcode,
         property_type="flat",
@@ -395,11 +425,24 @@ async def calculate_title_split_potential(
     net_uplift = gross_uplift - total_costs
     net_per_unit = net_uplift // num_units if num_units > 0 else 0
 
+    # Get comparable flat sales from Land Registry
+    comparable_sales = []
+    avg_price_per_sqf = None
+    if sold_prices_sqf:
+        flat_sales = [s for s in sold_prices_sqf.get("raw_data", []) if s.get("type") == "flat"]
+        comparable_sales = flat_sales[:5]  # Top 5 comparables
+        if flat_sales:
+            sqf_prices = [s["price_per_sqf"] for s in flat_sales if s.get("price_per_sqf")]
+            if sqf_prices:
+                avg_price_per_sqf = sum(sqf_prices) // len(sqf_prices)
+
     return {
         "status": "success",
         "asking_price": asking_price,
         "num_units": num_units,
         "estimated_unit_value": unit_value,
+        "unit_value_low": valuation.value_low,
+        "unit_value_high": valuation.value_high,
         "unit_value_confidence": valuation.confidence,
         "total_separated_value": total_separated_value,
         "gross_uplift": gross_uplift,
@@ -409,4 +452,7 @@ async def calculate_title_split_potential(
         "net_per_unit": net_per_unit,
         "meets_threshold": net_per_unit >= 2000,  # Framework minimum
         "recommendation": "proceed" if net_per_unit >= 5000 else "review" if net_per_unit >= 2000 else "decline",
+        # Land Registry / EPC data
+        "avg_price_per_sqf": avg_price_per_sqf,
+        "comparable_sales": comparable_sales,
     }

@@ -131,11 +131,23 @@ export async function analyzeUrl(url: string): Promise<AnalysisResult> {
   return res.json();
 }
 
+export interface ComparableSale {
+  date: string | null;
+  address: string | null;
+  price: number | null;
+  sqf: number | null;
+  price_per_sqf: number | null;
+  type: string | null;
+  tenure: string | null;
+}
+
 export interface ValuationResult {
   status: string;
   asking_price: number;
   num_units: number;
   estimated_unit_value: number | null;
+  unit_value_low: number | null;
+  unit_value_high: number | null;
   unit_value_confidence: string | null;
   total_separated_value: number | null;
   gross_uplift: number | null;
@@ -146,6 +158,9 @@ export interface ValuationResult {
   meets_threshold: boolean | null;
   recommendation: string | null;
   message: string | null;
+  // Land Registry / EPC data
+  avg_price_per_sqf: number | null;
+  comparable_sales: ComparableSale[] | null;
 }
 
 export async function getValuation(

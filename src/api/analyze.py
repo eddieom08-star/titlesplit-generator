@@ -418,11 +418,23 @@ class ValuationRequest(BaseModel):
     avg_bedrooms: int = 2
 
 
+class ComparableSale(BaseModel):
+    date: Optional[str] = None
+    address: Optional[str] = None
+    price: Optional[int] = None
+    sqf: Optional[int] = None
+    price_per_sqf: Optional[int] = None
+    type: Optional[str] = None
+    tenure: Optional[str] = None
+
+
 class ValuationResponse(BaseModel):
     status: str
     asking_price: int
     num_units: int
     estimated_unit_value: Optional[int] = None
+    unit_value_low: Optional[int] = None
+    unit_value_high: Optional[int] = None
     unit_value_confidence: Optional[str] = None
     total_separated_value: Optional[int] = None
     gross_uplift: Optional[int] = None
@@ -433,6 +445,9 @@ class ValuationResponse(BaseModel):
     meets_threshold: Optional[bool] = None
     recommendation: Optional[str] = None
     message: Optional[str] = None
+    # Land Registry / EPC data
+    avg_price_per_sqf: Optional[int] = None
+    comparable_sales: Optional[list[ComparableSale]] = None
 
 
 @router.post("/valuation", response_model=ValuationResponse)

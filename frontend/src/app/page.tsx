@@ -319,34 +319,78 @@ export default function Dashboard() {
                   </div>
 
                   {valuationResult && valuationResult.status === 'success' && (
-                    <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="font-semibold text-green-800">PropertyData Valuation</span>
-                        <Badge variant={valuationResult.recommendation === 'proceed' ? 'default' : valuationResult.recommendation === 'review' ? 'secondary' : 'destructive'}>
-                          {valuationResult.recommendation?.toUpperCase()}
-                        </Badge>
+                    <div className="space-y-4">
+                      {/* Main Valuation */}
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-semibold text-green-800">PropertyData Valuation</span>
+                          <Badge variant={valuationResult.recommendation === 'proceed' ? 'default' : valuationResult.recommendation === 'review' ? 'secondary' : 'destructive'}>
+                            {valuationResult.recommendation?.toUpperCase()}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div>
+                            <p className="text-xs text-gray-500">Est. Unit Value</p>
+                            <p className="font-semibold">{valuationResult.estimated_unit_value ? formatPrice(valuationResult.estimated_unit_value) : 'N/A'}</p>
+                            <p className="text-xs text-gray-400">
+                              {valuationResult.unit_value_low && valuationResult.unit_value_high
+                                ? `${formatPrice(valuationResult.unit_value_low)} - ${formatPrice(valuationResult.unit_value_high)}`
+                                : valuationResult.unit_value_confidence + ' confidence'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Total Separated</p>
+                            <p className="font-semibold">{valuationResult.total_separated_value ? formatPrice(valuationResult.total_separated_value) : 'N/A'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Gross Uplift</p>
+                            <p className="font-semibold text-green-600">{valuationResult.gross_uplift ? formatPrice(valuationResult.gross_uplift) : 'N/A'}</p>
+                            <p className="text-xs text-gray-400">{valuationResult.gross_uplift_percent}%</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Net Per Unit</p>
+                            <p className="font-semibold text-green-600">{valuationResult.net_per_unit ? formatPrice(valuationResult.net_per_unit) : 'N/A'}</p>
+                            <p className="text-xs text-gray-400">{valuationResult.meets_threshold ? '✓ Above £2k threshold' : '✗ Below threshold'}</p>
+                          </div>
+                        </div>
+                        {valuationResult.avg_price_per_sqf && (
+                          <div className="mt-3 pt-3 border-t border-green-200">
+                            <p className="text-xs text-gray-500">Avg Price/sqft (from EPC data)</p>
+                            <p className="font-semibold">£{valuationResult.avg_price_per_sqf}/sqft</p>
+                          </div>
+                        )}
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                        <div>
-                          <p className="text-xs text-gray-500">Unit Value</p>
-                          <p className="font-semibold">{valuationResult.estimated_unit_value ? formatPrice(valuationResult.estimated_unit_value) : 'N/A'}</p>
-                          <p className="text-xs text-gray-400">{valuationResult.unit_value_confidence} confidence</p>
+
+                      {/* Land Registry Comparables */}
+                      {valuationResult.comparable_sales && valuationResult.comparable_sales.length > 0 && (
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="font-semibold text-blue-800 mb-3">Land Registry Comparables</p>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-left text-gray-500">
+                                  <th className="pb-2">Address</th>
+                                  <th className="pb-2">Date</th>
+                                  <th className="pb-2 text-right">Price</th>
+                                  <th className="pb-2 text-right">Sqft</th>
+                                  <th className="pb-2 text-right">£/sqft</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {valuationResult.comparable_sales.map((sale, i) => (
+                                  <tr key={i} className="border-t border-blue-100">
+                                    <td className="py-2 pr-2 max-w-[200px] truncate">{sale.address}</td>
+                                    <td className="py-2 pr-2">{sale.date}</td>
+                                    <td className="py-2 text-right font-medium">{sale.price ? formatPrice(sale.price) : '-'}</td>
+                                    <td className="py-2 text-right">{sale.sqf || '-'}</td>
+                                    <td className="py-2 text-right">{sale.price_per_sqf ? `£${sale.price_per_sqf}` : '-'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs text-gray-500">Total Separated</p>
-                          <p className="font-semibold">{valuationResult.total_separated_value ? formatPrice(valuationResult.total_separated_value) : 'N/A'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">Gross Uplift</p>
-                          <p className="font-semibold text-green-600">{valuationResult.gross_uplift ? formatPrice(valuationResult.gross_uplift) : 'N/A'}</p>
-                          <p className="text-xs text-gray-400">{valuationResult.gross_uplift_percent}%</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">Net Per Unit</p>
-                          <p className="font-semibold text-green-600">{valuationResult.net_per_unit ? formatPrice(valuationResult.net_per_unit) : 'N/A'}</p>
-                          <p className="text-xs text-gray-400">{valuationResult.meets_threshold ? '✓ Above £2k threshold' : '✗ Below threshold'}</p>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
