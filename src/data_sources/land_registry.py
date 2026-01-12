@@ -45,15 +45,15 @@ MANUAL_VERIFICATION_REQUIRED = [
 class LandRegistryClient:
     """Client for HM Land Registry Price Paid Data."""
 
+    # Use Linked Data API (SPARQL endpoint is unreliable)
     PPD_BASE_URL = "https://landregistry.data.gov.uk/data/ppi/transaction-record.json"
-    SPARQL_ENDPOINT = "https://landregistry.data.gov.uk/app/root/qonsole/query"
 
     PROPERTY_TYPES = {
-        "flat": "F",
-        "terraced": "T",
-        "semi-detached": "S",
-        "detached": "D",
-        "other": "O",
+        "flat": "flat-maisonette",
+        "terraced": "terraced",
+        "semi-detached": "semi-detached",
+        "detached": "detached",
+        "other": "otherPropertyType",
     }
 
     async def get_comparable_sales(
@@ -66,136 +66,151 @@ class LandRegistryClient:
         """
         Fetch recent sales in the area for valuation.
 
-        Used for:
-        - Section 5: Individual unit values (aggregate vs portfolio)
-        - Section 2: Exit strategy (market evidence)
+        Uses Land Registry Linked Data API.
         """
-        # Get the postcode sector (e.g., "L1 2" from "L1 2AB")
         postcode = postcode.upper().strip()
-        postcode_sector = postcode.rsplit(" ", 1)[0] if " " in postcode else postcode[:-3]
 
         # Calculate date range
         end_date = datetime.now()
         start_date = end_date - timedelta(days=months_back * 30)
 
-        # Build SPARQL query for Price Paid Data
-        query = self._build_ppd_query(
-            postcode_sector=postcode_sector,
-            property_type=property_type,
-            start_date=start_date,
-            end_date=end_date,
-            limit=max_results,
-        )
+        # Map property type code to API value
+        prop_type_map = {"F": "flat-maisonette", "T": "terraced", "S": "semi-detached", "D": "detached"}
+        property_type_value = prop_type_map.get(property_type, "flat-maisonette")
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.post(
-                    self.SPARQL_ENDPOINT,
-                    data={"query": query, "output": "json"},
-                    headers={"Accept": "application/sparql-results+json"},
-                )
-                response.raise_for_status()
-                data = response.json()
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            all_sales = []
 
-                sales = []
-                for binding in data.get("results", {}).get("bindings", []):
-                    try:
-                        sale = self._parse_sale(binding)
-                        if sale:
-                            sales.append(sale)
-                    except Exception as e:
-                        logger.warning("Failed to parse sale record", error=str(e))
+            # Try exact postcode first
+            sales = await self._fetch_sales(client, postcode, property_type_value, start_date, max_results)
+            all_sales.extend(sales)
+            logger.info("Land Registry exact postcode search", postcode=postcode, count=len(sales))
 
-                return sales
+            # If not enough results, expand to postcode sector
+            if len(all_sales) < 10:
+                postcode_sector = postcode.rsplit(" ", 1)[0] if " " in postcode else postcode[:-3]
+                # Search nearby postcodes in same sector
+                for suffix in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]:
+                    nearby = f"{postcode_sector} {suffix}"
+                    if nearby != postcode[:len(nearby)]:
+                        sector_sales = await self._fetch_sales(client, nearby, property_type_value, start_date, 10)
+                        all_sales.extend(sector_sales)
+                        if len(all_sales) >= max_results:
+                            break
 
-            except httpx.HTTPError as e:
-                logger.error("Land Registry API request failed", error=str(e))
-                return []
+            # If still not enough flats, include all property types in the area
+            if len(all_sales) < 5:
+                logger.info("Expanding search to all property types", postcode=postcode)
+                for prop_type in ["terraced", "semi-detached"]:
+                    extra_sales = await self._fetch_sales(client, postcode, prop_type, start_date, 20)
+                    all_sales.extend(extra_sales)
 
-    def _build_ppd_query(
+            # Remove duplicates and sort by date
+            seen = set()
+            unique_sales = []
+            for sale in all_sales:
+                key = (sale.address, sale.price, sale.sale_date.date())
+                if key not in seen:
+                    seen.add(key)
+                    unique_sales.append(sale)
+
+            unique_sales.sort(key=lambda s: s.sale_date, reverse=True)
+            return unique_sales[:max_results]
+
+    async def _fetch_sales(
         self,
-        postcode_sector: str,
+        client: httpx.AsyncClient,
+        postcode: str,
         property_type: str,
-        start_date: datetime,
-        end_date: datetime,
+        min_date: datetime,
         limit: int,
-    ) -> str:
-        """Build SPARQL query for Price Paid Data."""
-        return f"""
-        PREFIX lrppi: <http://landregistry.data.gov.uk/def/ppi/>
-        PREFIX lrcommon: <http://landregistry.data.gov.uk/def/common/>
-
-        SELECT ?item ?price ?date ?propertyType ?newBuild ?estateType ?address ?postcode
-        WHERE {{
-            ?item a lrppi:TransactionRecord ;
-                  lrppi:pricePaid ?price ;
-                  lrppi:transactionDate ?date ;
-                  lrppi:propertyType ?propertyType ;
-                  lrppi:newBuild ?newBuild ;
-                  lrppi:estateType ?estateType ;
-                  lrppi:propertyAddress ?addressObj .
-
-            ?addressObj lrcommon:postcode ?postcode ;
-                        lrcommon:paon ?paon .
-
-            OPTIONAL {{ ?addressObj lrcommon:saon ?saon }}
-            OPTIONAL {{ ?addressObj lrcommon:street ?street }}
-            OPTIONAL {{ ?addressObj lrcommon:town ?town }}
-
-            BIND(CONCAT(COALESCE(?saon, ""), " ", ?paon, " ", COALESCE(?street, ""), ", ", COALESCE(?town, "")) AS ?address)
-
-            FILTER(STRSTARTS(?postcode, "{postcode_sector}"))
-            FILTER(?date >= "{start_date.strftime('%Y-%m-%d')}"^^xsd:date)
-            FILTER(?date <= "{end_date.strftime('%Y-%m-%d')}"^^xsd:date)
-            FILTER(?propertyType = lrcommon:{self._get_property_type_uri(property_type)})
-        }}
-        ORDER BY DESC(?date)
-        LIMIT {limit}
-        """
-
-    def _get_property_type_uri(self, type_code: str) -> str:
-        """Convert property type code to URI fragment."""
-        mapping = {
-            "F": "flat-maisonette",
-            "T": "terraced",
-            "S": "semi-detached",
-            "D": "detached",
-            "O": "other",
-        }
-        return mapping.get(type_code, "flat-maisonette")
-
-    def _parse_sale(self, binding: dict) -> Optional[ComparableSale]:
-        """Parse a single sale record from SPARQL results."""
+    ) -> list[ComparableSale]:
+        """Fetch sales from the Linked Data API."""
         try:
-            price = int(binding.get("price", {}).get("value", 0))
+            # Build URL with filters
+            params = {
+                "propertyAddress.postcode": postcode,
+                "propertyType": f"http://landregistry.data.gov.uk/def/common/{property_type}",
+                "min-transactionDate": min_date.strftime("%Y-%m-%d"),
+                "_pageSize": str(limit),
+                "_sort": "-transactionDate",
+            }
+
+            response = await client.get(self.PPD_BASE_URL, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            sales = []
+            for item in data.get("result", {}).get("items", []):
+                try:
+                    sale = self._parse_linked_data_item(item)
+                    if sale:
+                        sales.append(sale)
+                except Exception as e:
+                    logger.warning("Failed to parse sale record", error=str(e))
+
+            return sales
+
+        except httpx.HTTPError as e:
+            logger.warning("Land Registry API request failed", error=str(e), postcode=postcode)
+            return []
+
+    def _parse_linked_data_item(self, item: dict) -> Optional[ComparableSale]:
+        """Parse a sale record from Linked Data API response."""
+        try:
+            price = item.get("pricePaid", 0)
             if not price:
                 return None
 
-            date_str = binding.get("date", {}).get("value", "")
-            sale_date = datetime.fromisoformat(date_str) if date_str else datetime.now()
+            # Parse date
+            date_val = item.get("transactionDate")
+            if isinstance(date_val, dict):
+                date_str = date_val.get("_value", "")
+            else:
+                date_str = str(date_val) if date_val else ""
+            sale_date = datetime.fromisoformat(date_str[:10]) if date_str else datetime.now()
 
-            property_type_uri = binding.get("propertyType", {}).get("value", "")
-            property_type = self._parse_property_type(property_type_uri)
+            # Parse address
+            addr_obj = item.get("propertyAddress", {})
+            address_parts = [
+                addr_obj.get("saon", ""),
+                addr_obj.get("paon", ""),
+                addr_obj.get("street", ""),
+                addr_obj.get("town", ""),
+            ]
+            address = " ".join(filter(None, address_parts)).strip()
+            postcode = addr_obj.get("postcode", "")
 
-            new_build_uri = binding.get("newBuild", {}).get("value", "")
-            new_build = "true" in new_build_uri.lower() or "new-build" in new_build_uri.lower()
+            # Parse property type
+            prop_type_obj = item.get("propertyType", {})
+            prop_type_label = ""
+            if isinstance(prop_type_obj, dict):
+                prop_type_label = prop_type_obj.get("_about", "")
+            property_type = self._parse_property_type(prop_type_label)
 
-            estate_type_uri = binding.get("estateType", {}).get("value", "")
-            estate_type = "F" if "freehold" in estate_type_uri.lower() else "L"
+            # Parse estate type
+            estate_obj = item.get("estateType", {})
+            estate_label = ""
+            if isinstance(estate_obj, dict):
+                estate_label = estate_obj.get("_about", "")
+            estate_type = "F" if "freehold" in estate_label.lower() else "L"
+
+            # New build
+            new_build = bool(item.get("newBuild", False))
 
             return ComparableSale(
-                address=binding.get("address", {}).get("value", "").strip(),
-                postcode=binding.get("postcode", {}).get("value", "").strip(),
+                address=address,
+                postcode=postcode,
                 price=price,
                 sale_date=sale_date,
                 property_type=property_type,
                 new_build=new_build,
                 estate_type=estate_type,
                 transaction_category="standard",
-                raw_data=binding,
+                raw_data=item,
             )
         except Exception as e:
-            logger.warning("Failed to parse sale", error=str(e))
+            logger.warning("Failed to parse linked data item", error=str(e))
             return None
 
     def _parse_property_type(self, uri: str) -> str:
