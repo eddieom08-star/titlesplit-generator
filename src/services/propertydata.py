@@ -103,7 +103,7 @@ class PropertyDataClient:
             if internal_area:
                 params["internal_area"] = internal_area
 
-            data = await self._request("valuation", params)
+            data = await self._request("valuation-sale", params)
 
             result = data.get("result", {})
 
@@ -180,7 +180,7 @@ class PropertyDataClient:
                 "bedrooms": bedrooms,
             }
 
-            data = await self._request("rents", params)
+            data = await self._request("valuation-rent", params)
 
             result = data.get("result", {})
 
