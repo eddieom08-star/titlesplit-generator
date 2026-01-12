@@ -101,9 +101,15 @@ class LandRegistryClient:
             # If still not enough flats, include all property types in the area
             if len(all_sales) < 5:
                 logger.info("Expanding search to all property types", postcode=postcode)
-                for prop_type in ["terraced", "semi-detached"]:
+                for prop_type in ["terraced", "semi-detached", "detached"]:
                     extra_sales = await self._fetch_sales(client, postcode, prop_type, start_date, 20)
                     all_sales.extend(extra_sales)
+
+            # If STILL not enough, search without property type filter
+            if len(all_sales) < 5:
+                logger.info("Searching all sales without property type filter", postcode=postcode)
+                extra_sales = await self._fetch_sales_no_type(client, postcode, start_date, 30)
+                all_sales.extend(extra_sales)
 
             # Remove duplicates and sort by date
             seen = set()
@@ -155,6 +161,41 @@ class LandRegistryClient:
             logger.warning("Land Registry API request failed", error=str(e), postcode=postcode)
             return []
 
+    async def _fetch_sales_no_type(
+        self,
+        client: httpx.AsyncClient,
+        postcode: str,
+        min_date: datetime,
+        limit: int,
+    ) -> list[ComparableSale]:
+        """Fetch sales without property type filter."""
+        try:
+            params = {
+                "propertyAddress.postcode": postcode,
+                "min-transactionDate": min_date.strftime("%Y-%m-%d"),
+                "_pageSize": str(limit),
+                "_sort": "-transactionDate",
+            }
+
+            response = await client.get(self.PPD_BASE_URL, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            sales = []
+            for item in data.get("result", {}).get("items", []):
+                try:
+                    sale = self._parse_linked_data_item(item)
+                    if sale:
+                        sales.append(sale)
+                except Exception as e:
+                    logger.warning("Failed to parse sale record", error=str(e))
+
+            return sales
+
+        except httpx.HTTPError as e:
+            logger.warning("Land Registry API request failed (no type)", error=str(e), postcode=postcode)
+            return []
+
     def _parse_linked_data_item(self, item: dict) -> Optional[ComparableSale]:
         """Parse a sale record from Linked Data API response."""
         try:
@@ -162,13 +203,29 @@ class LandRegistryClient:
             if not price:
                 return None
 
-            # Parse date
+            # Parse date - API returns various formats including "Fri, 12 Jan 2001"
             date_val = item.get("transactionDate")
             if isinstance(date_val, dict):
                 date_str = date_val.get("_value", "")
             else:
                 date_str = str(date_val) if date_val else ""
-            sale_date = datetime.fromisoformat(date_str[:10]) if date_str else datetime.now()
+
+            sale_date = datetime.now()
+            if date_str:
+                try:
+                    # Try ISO format first (YYYY-MM-DD)
+                    sale_date = datetime.fromisoformat(date_str[:10])
+                except ValueError:
+                    try:
+                        # Try human-readable format "Fri, 12 Jan 2001"
+                        from email.utils import parsedate_to_datetime
+                        sale_date = parsedate_to_datetime(date_str)
+                    except (ValueError, TypeError):
+                        try:
+                            # Try alternative format "12 Jan 2001"
+                            sale_date = datetime.strptime(date_str, "%d %b %Y")
+                        except ValueError:
+                            logger.warning("Could not parse date", date_str=date_str)
 
             # Parse address
             addr_obj = item.get("propertyAddress", {})
