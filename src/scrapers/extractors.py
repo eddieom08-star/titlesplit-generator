@@ -12,13 +12,32 @@ class ExtractionResult:
     pattern_matched: Optional[str] = None
 
 
+# Word to number mapping
+WORD_TO_NUMBER = {
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+    'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
+    'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20,
+}
+
+
+def normalize_numbers_in_text(text: str) -> str:
+    """Replace word numbers with digits in text."""
+    result = text.lower()
+    for word, num in sorted(WORD_TO_NUMBER.items(), key=lambda x: -len(x[0])):
+        result = re.sub(rf'\b{word}\b', str(num), result)
+    return result
+
+
 # Unit count extraction patterns (ordered by reliability)
 UNIT_COUNT_PATTERNS = [
     # Explicit statements
     (r'block of (\d+) (?:self[- ]?contained )?(?:flats|apartments)', 0.95),
     (r'(\d+) (?:self[- ]?contained )?(?:flats|apartments|units)', 0.90),
+    (r'(\d+) flats? in a? ?(?:converted|victorian|period)', 0.92),
     (r'comprises (\d+)', 0.85),
     (r'containing (\d+)', 0.85),
+    (r'converted (?:into|to) (\d+)', 0.90),
     # Bedroom-based inference
     (r'(\d+) x \d[- ]?bed', 0.80),  # "4 x 2-bed flats"
     (r'(\d+) \d[- ]?bedroom flats', 0.80),
@@ -77,10 +96,11 @@ RED_FLAGS = [
 
 def extract_unit_count(text: str) -> ExtractionResult:
     """Extract unit count from listing text."""
-    text_lower = text.lower()
+    # Normalize word numbers to digits (e.g., "three flats" -> "3 flats")
+    text_normalized = normalize_numbers_in_text(text)
 
     for pattern, confidence in UNIT_COUNT_PATTERNS:
-        match = re.search(pattern, text_lower)
+        match = re.search(pattern, text_normalized)
         if match:
             try:
                 count = int(match.group(1))

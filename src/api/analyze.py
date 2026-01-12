@@ -195,7 +195,19 @@ def parse_rightmove_data(data: dict) -> dict:
     address = prop.get("address", {})
     display_address = address.get("displayAddress", "")
 
-    text = f"{prop.get('propertySubDescription', '')} {prop.get('summary', '')}"
+    # Combine ALL available text fields for analysis
+    text_parts = [
+        prop.get("propertySubDescription", ""),
+        prop.get("summary", ""),
+        prop.get("text", {}).get("description", ""),
+        prop.get("keyFeatures", ""),
+    ]
+    # Handle keyFeatures if it's a list
+    if isinstance(prop.get("keyFeatures"), list):
+        text_parts.append(" ".join(prop.get("keyFeatures", [])))
+
+    text = " ".join(filter(None, text_parts))
+    logger.debug("Parsing Rightmove data", text_length=len(text), text_preview=text[:200])
 
     units = extract_unit_count(text)
     tenure = extract_tenure(text)
@@ -209,6 +221,7 @@ def parse_rightmove_data(data: dict) -> dict:
         "postcode": postcode,
         "units": units.value,
         "tenure": tenure.value,
+        "description": text,  # Include full description for further analysis
     }
 
 
@@ -229,9 +242,34 @@ def parse_rightmove_html(html: str, url: str) -> dict:
     # Extract postcode
     postcode = extract_postcode(html) or ""
 
-    # Extract units and tenure from description
-    units = extract_unit_count(html)
-    tenure = extract_tenure(html)
+    # Extract key features section
+    key_features_text = ""
+    key_features_match = re.search(
+        r'Key features.*?<ul[^>]*>(.*?)</ul>',
+        html, re.IGNORECASE | re.DOTALL
+    )
+    if key_features_match:
+        # Extract text from list items
+        features = re.findall(r'<li[^>]*>([^<]+)</li>', key_features_match.group(1))
+        key_features_text = " ".join(features)
+
+    # Extract property description section
+    description_text = ""
+    desc_match = re.search(
+        r'(?:property description|about this property).*?<div[^>]*>(.*?)</div>',
+        html, re.IGNORECASE | re.DOTALL
+    )
+    if desc_match:
+        # Strip HTML tags
+        description_text = re.sub(r'<[^>]+>', ' ', desc_match.group(1))
+
+    # Combine all text for analysis
+    full_text = f"{title} {key_features_text} {description_text} {html}"
+    logger.debug("Parsing Rightmove HTML", key_features=key_features_text[:100] if key_features_text else "none")
+
+    # Extract units and tenure from full text
+    units = extract_unit_count(full_text)
+    tenure = extract_tenure(full_text)
 
     # Try to get city from address
     city = ""
@@ -248,6 +286,7 @@ def parse_rightmove_html(html: str, url: str) -> dict:
         "postcode": postcode,
         "units": units.value,
         "tenure": tenure.value,
+        "description": f"{key_features_text} {description_text}".strip(),
     }
 
 
