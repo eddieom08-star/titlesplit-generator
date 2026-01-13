@@ -566,12 +566,12 @@ export default function PropertyDetailPage() {
               </p>
               <div className="space-y-4">
                 <div className="flex items-center gap-4">
-                  <Input
+                  <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp,image/gif"
-                    multiple
+                    multiple={true}
                     onChange={(e) => setFloorplanFiles(e.target.files ? Array.from(e.target.files) : [])}
-                    className="flex-1"
+                    className="flex-1 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-md file:border file:border-input file:bg-background file:text-sm file:font-medium hover:file:bg-accent"
                   />
                   <Button
                     onClick={handleFloorplanUpload}
