@@ -7,7 +7,7 @@ from alembic import context
 
 from src.database import Base
 from src.config import get_settings
-from src.models import Property, UnitEPC, Comparable, Analysis  # noqa: F401
+from src.models import Property, UnitEPC, Comparable, Analysis, ManualInput  # noqa: F401
 
 config = context.config
 settings = get_settings()

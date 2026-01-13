@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers
-revision = '002'
-down_revision = '001'
+revision = '002_add_floorplan'
+down_revision = '001_add_archived'
 branch_labels = None
 depends_on = None
 

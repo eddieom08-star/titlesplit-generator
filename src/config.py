@@ -6,7 +6,15 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/titlesplit"
-    database_url_sync: str = "postgresql://postgres:password@localhost:5432/titlesplit"
+
+    @property
+    def database_url_sync(self) -> str:
+        """Derive sync URL from async URL for alembic."""
+        import re
+        url = self.database_url
+        # Convert asyncpg back to sync driver
+        url = re.sub(r'postgresql\+asyncpg://', 'postgresql://', url)
+        return url
 
     @field_validator("database_url", mode="before")
     @classmethod
