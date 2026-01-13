@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, File, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 import structlog
 
@@ -20,6 +20,41 @@ from src.analysis.floorplan_analyzer import FloorplanAnalyzer
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/properties", tags=["properties"])
+
+
+@router.get("/debug/schema")
+async def debug_schema():
+    """Debug endpoint to check database schema."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Check what tables exist
+            result = await session.execute(
+                text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+            )
+            tables = [row[0] for row in result.fetchall()]
+
+            # Check manual_inputs columns if table exists
+            mi_columns = []
+            if "manual_inputs" in tables:
+                col_result = await session.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'manual_inputs'")
+                )
+                mi_columns = [row[0] for row in col_result.fetchall()]
+
+            # Check alembic version
+            alembic_version = None
+            if "alembic_version" in tables:
+                ver_result = await session.execute(text("SELECT version_num FROM alembic_version"))
+                row = ver_result.fetchone()
+                alembic_version = row[0] if row else None
+
+            return {
+                "tables": tables,
+                "manual_inputs_columns": mi_columns,
+                "alembic_version": alembic_version,
+            }
+    except Exception as e:
+        return {"error": str(e), "error_type": type(e).__name__}
 
 
 # Request/Response Models
