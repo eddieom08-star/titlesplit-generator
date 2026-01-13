@@ -32,7 +32,7 @@ export default function PropertyDetailPage() {
   const [saving, setSaving] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [uploadingFloorplan, setUploadingFloorplan] = useState(false);
-  const [floorplanFile, setFloorplanFile] = useState<File | null>(null);
+  const [floorplanFiles, setFloorplanFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Form state
@@ -112,20 +112,48 @@ export default function PropertyDetailPage() {
   }
 
   async function handleFloorplanUpload() {
-    if (!floorplanFile) return;
+    if (floorplanFiles.length === 0) return;
 
     try {
       setUploadingFloorplan(true);
       setError(null);
 
-      const result = await uploadFloorplan(propertyId, floorplanFile);
-      setFloorplanAnalysis(result);
-      setFloorplanFile(null);
+      // Upload all files and merge results
+      const results: FloorplanAnalysis[] = [];
+      for (const file of floorplanFiles) {
+        const result = await uploadFloorplan(propertyId, file);
+        results.push(result);
+      }
+
+      // Merge results from multiple floorplans
+      if (results.length === 1) {
+        setFloorplanAnalysis(results[0]);
+      } else {
+        // Combine results from multiple floorplans
+        const mergedAnalysis: FloorplanAnalysis = {
+          units_detected: results.reduce((sum, r) => sum + r.units_detected, 0),
+          confidence: results.reduce((sum, r) => sum + r.confidence, 0) / results.length,
+          units: results.flatMap(r => r.units),
+          self_contained_assessment: {
+            all_self_contained: results.every(r => r.self_contained_assessment.all_self_contained),
+            concerns: [...new Set(results.flatMap(r => r.self_contained_assessment.concerns))],
+            evidence: results.map(r => r.self_contained_assessment.evidence).filter(Boolean).join('; '),
+          },
+          layout_concerns: [...new Set(results.flatMap(r => r.layout_concerns))],
+          suitable_for_title_split: results.every(r => r.suitable_for_title_split),
+          analysis_notes: `Combined analysis from ${results.length} floorplans. ` +
+            results.map((r, i) => `Floorplan ${i + 1}: ${r.analysis_notes}`).join(' | '),
+          analyzed_at: new Date().toISOString(),
+        };
+        setFloorplanAnalysis(mergedAnalysis);
+      }
+
+      setFloorplanFiles([]);
 
       // Refresh property data
       await loadProperty();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to analyze floorplan');
+      setError(err instanceof Error ? err.message : 'Failed to analyze floorplan(s)');
       console.error(err);
     } finally {
       setUploadingFloorplan(false);
@@ -534,28 +562,34 @@ export default function PropertyDetailPage() {
             <div className="border-b pb-4">
               <h3 className="font-semibold mb-3">Floorplan Analysis</h3>
               <p className="text-sm text-gray-500 mb-3">
-                Upload a floorplan image for AI-powered room detection and layout analysis
+                Upload floorplan image(s) for AI-powered room detection and layout analysis
               </p>
               <div className="space-y-4">
                 <div className="flex items-center gap-4">
                   <Input
                     type="file"
                     accept="image/jpeg,image/png,image/webp,image/gif"
-                    onChange={(e) => setFloorplanFile(e.target.files?.[0] || null)}
+                    multiple
+                    onChange={(e) => setFloorplanFiles(e.target.files ? Array.from(e.target.files) : [])}
                     className="flex-1"
                   />
                   <Button
                     onClick={handleFloorplanUpload}
-                    disabled={!floorplanFile || uploadingFloorplan}
+                    disabled={floorplanFiles.length === 0 || uploadingFloorplan}
                     variant="outline"
                   >
-                    {uploadingFloorplan ? 'Analyzing...' : 'Analyze'}
+                    {uploadingFloorplan ? 'Analyzing...' : `Analyze${floorplanFiles.length > 1 ? ` (${floorplanFiles.length})` : ''}`}
                   </Button>
                 </div>
-                {floorplanFile && (
-                  <p className="text-sm text-gray-500">
-                    Selected: {floorplanFile.name} ({(floorplanFile.size / 1024).toFixed(1)} KB)
-                  </p>
+                {floorplanFiles.length > 0 && (
+                  <div className="text-sm text-gray-500">
+                    <p className="font-medium mb-1">Selected {floorplanFiles.length} file{floorplanFiles.length > 1 ? 's' : ''}:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      {floorplanFiles.map((file, i) => (
+                        <li key={i}>{file.name} ({(file.size / 1024).toFixed(1)} KB)</li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
 
                 {/* Existing Floorplan Analysis Results */}
