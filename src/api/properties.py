@@ -127,9 +127,9 @@ async def get_property_detail(property_id: UUID):
     """Get full property details including manual inputs."""
     try:
         async with AsyncSessionLocal() as session:
+            # First try without manual_inputs to debug
             result = await session.execute(
                 select(Property)
-                .options(selectinload(Property.manual_inputs))
                 .where(Property.id == property_id)
             )
             property = result.scalar_one_or_none()
@@ -137,8 +137,18 @@ async def get_property_detail(property_id: UUID):
             if not property:
                 raise HTTPException(status_code=404, detail="Property not found")
 
-            # Get latest manual input if exists
-            manual_input = property.manual_inputs[0] if property.manual_inputs else None
+            # Try to load manual inputs separately with error handling
+            manual_input = None
+            try:
+                mi_result = await session.execute(
+                    select(ManualInput)
+                    .where(ManualInput.property_id == property_id)
+                    .limit(1)
+                )
+                manual_input = mi_result.scalar_one_or_none()
+            except Exception as mi_err:
+                logger.warning("Failed to load manual inputs", error=str(mi_err))
+                # Continue without manual inputs
 
             return PropertyDetail(
                 id=str(property.id),
