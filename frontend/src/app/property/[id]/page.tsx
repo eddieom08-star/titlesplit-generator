@@ -136,10 +136,10 @@ export default function PropertyDetailPage() {
           units: results.flatMap(r => r.units),
           self_contained_assessment: {
             all_self_contained: results.every(r => r.self_contained_assessment.all_self_contained),
-            concerns: [...new Set(results.flatMap(r => r.self_contained_assessment.concerns))],
+            concerns: Array.from(new Set(results.flatMap(r => r.self_contained_assessment.concerns))),
             evidence: results.map(r => r.self_contained_assessment.evidence).filter(Boolean).join('; '),
           },
-          layout_concerns: [...new Set(results.flatMap(r => r.layout_concerns))],
+          layout_concerns: Array.from(new Set(results.flatMap(r => r.layout_concerns))),
           suitable_for_title_split: results.every(r => r.suitable_for_title_split),
           analysis_notes: `Combined analysis from ${results.length} floorplans. ` +
             results.map((r, i) => `Floorplan ${i + 1}: ${r.analysis_notes}`).join(' | '),
