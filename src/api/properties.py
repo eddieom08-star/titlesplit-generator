@@ -125,35 +125,41 @@ class FloorplanAnalysisResponse(BaseModel):
 @router.get("/{property_id}", response_model=PropertyDetail)
 async def get_property_detail(property_id: UUID):
     """Get full property details including manual inputs."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Property)
-            .options(selectinload(Property.manual_inputs))
-            .where(Property.id == property_id)
-        )
-        property = result.scalar_one_or_none()
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Property)
+                .options(selectinload(Property.manual_inputs))
+                .where(Property.id == property_id)
+            )
+            property = result.scalar_one_or_none()
 
-        if not property:
-            raise HTTPException(status_code=404, detail="Property not found")
+            if not property:
+                raise HTTPException(status_code=404, detail="Property not found")
 
-        # Get latest manual input if exists
-        manual_input = property.manual_inputs[0] if property.manual_inputs else None
+            # Get latest manual input if exists
+            manual_input = property.manual_inputs[0] if property.manual_inputs else None
 
-        return PropertyDetail(
-            id=str(property.id),
-            source_url=property.source_url,
-            title=property.title,
-            asking_price=property.asking_price,
-            city=property.city or "",
-            postcode=property.postcode or "",
-            estimated_units=property.estimated_units,
-            tenure=property.tenure,
-            tenure_confidence=property.tenure_confidence,
-            opportunity_score=property.opportunity_score,
-            status=property.status,
-            first_seen=property.first_seen.isoformat() if property.first_seen else "",
-            manual_inputs=_serialize_manual_input(manual_input) if manual_input else None,
-        )
+            return PropertyDetail(
+                id=str(property.id),
+                source_url=property.source_url,
+                title=property.title,
+                asking_price=property.asking_price,
+                city=property.city or "",
+                postcode=property.postcode or "",
+                estimated_units=property.estimated_units,
+                tenure=property.tenure,
+                tenure_confidence=property.tenure_confidence,
+                opportunity_score=property.opportunity_score,
+                status=property.status,
+                first_seen=property.first_seen.isoformat() if property.first_seen else "",
+                manual_inputs=_serialize_manual_input(manual_input) if manual_input else None,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error in get_property_detail", property_id=str(property_id), error=str(e), error_type=type(e).__name__)
+        raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}: {str(e)}")
 
 
 @router.put("/{property_id}/manual", response_model=RecalculatedAnalysis)
