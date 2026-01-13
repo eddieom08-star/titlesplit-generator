@@ -1,7 +1,7 @@
 import base64
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -11,6 +11,10 @@ import structlog
 from src.config import get_settings
 
 logger = structlog.get_logger()
+
+# In-memory cache for EPC results (TTL-based)
+_epc_cache: dict[str, tuple[list, datetime]] = {}
+_EPC_CACHE_TTL_SECONDS = 3600  # 1 hour cache
 
 
 @dataclass
@@ -55,10 +59,18 @@ class EPCClient:
         }
 
     async def search_by_postcode(self, postcode: str) -> list[EPCRecord]:
-        """Fetch all EPC certificates at a postcode."""
+        """Fetch all EPC certificates at a postcode with caching."""
         # Normalize postcode
         postcode = postcode.upper().replace(" ", "")
         postcode = f"{postcode[:-3]} {postcode[-3:]}"
+
+        # Check cache first
+        cache_key = f"epc:{postcode}"
+        if cache_key in _epc_cache:
+            cached_records, cached_time = _epc_cache[cache_key]
+            if (datetime.now() - cached_time).total_seconds() < _EPC_CACHE_TTL_SECONDS:
+                logger.info("EPC cache hit", postcode=postcode, count=len(cached_records))
+                return cached_records
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
@@ -87,6 +99,9 @@ class EPCClient:
                             records.append(record)
                     except Exception as e:
                         logger.warning("Failed to parse EPC record", error=str(e))
+
+                # Cache the result
+                _epc_cache[cache_key] = (records, datetime.now())
 
                 return records
 

@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
@@ -6,6 +7,10 @@ import httpx
 import structlog
 
 logger = structlog.get_logger()
+
+# In-memory cache for Land Registry results (TTL-based)
+_cache: dict[str, tuple[list, datetime]] = {}
+_CACHE_TTL_SECONDS = 3600  # 1 hour cache
 
 
 @dataclass
@@ -66,9 +71,17 @@ class LandRegistryClient:
         """
         Fetch recent sales in the area for valuation.
 
-        Uses Land Registry Linked Data API.
+        Uses Land Registry Linked Data API with caching and concurrent requests.
         """
         postcode = postcode.upper().strip()
+
+        # Check cache first
+        cache_key = f"{postcode}:{property_type}:{months_back}"
+        if cache_key in _cache:
+            cached_sales, cached_time = _cache[cache_key]
+            if (datetime.now() - cached_time).total_seconds() < _CACHE_TTL_SECONDS:
+                logger.info("Land Registry cache hit", postcode=postcode, count=len(cached_sales))
+                return cached_sales[:max_results]
 
         # Calculate date range
         end_date = datetime.now()
@@ -86,42 +99,67 @@ class LandRegistryClient:
             all_sales.extend(sales)
             logger.info("Land Registry exact postcode search", postcode=postcode, count=len(sales))
 
-            # If not enough results, expand to postcode sector
+            # If not enough results, expand to postcode sector CONCURRENTLY
             if len(all_sales) < 10:
                 postcode_sector = postcode.rsplit(" ", 1)[0] if " " in postcode else postcode[:-3]
-                # Search nearby postcodes in same sector
-                for suffix in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]:
-                    nearby = f"{postcode_sector} {suffix}"
-                    if nearby != postcode[:len(nearby)]:
-                        sector_sales = await self._fetch_sales(client, nearby, property_type_value, start_date, 10)
-                        all_sales.extend(sector_sales)
-                        if len(all_sales) >= max_results:
-                            break
+                # Build list of nearby postcodes to search
+                nearby_postcodes = [
+                    f"{postcode_sector} {suffix}"
+                    for suffix in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+                    if f"{postcode_sector} {suffix}" != postcode[:len(postcode_sector) + 2]
+                ]
+                # Fetch all concurrently instead of sequentially
+                if nearby_postcodes:
+                    tasks = [
+                        self._fetch_sales(client, nearby, property_type_value, start_date, 10)
+                        for nearby in nearby_postcodes[:5]  # Limit to 5 concurrent requests
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for result in results:
+                        if isinstance(result, list):
+                            all_sales.extend(result)
 
-            # If still not enough flats, include all property types in the area
+            # Deduplicate early to avoid unnecessary expansion
+            all_sales = self._deduplicate_sales(all_sales)
+
+            # If still not enough, try other property types CONCURRENTLY
             if len(all_sales) < 5:
                 logger.info("Expanding search to all property types", postcode=postcode)
-                for prop_type in ["terraced", "semi-detached", "detached"]:
-                    extra_sales = await self._fetch_sales(client, postcode, prop_type, start_date, 20)
-                    all_sales.extend(extra_sales)
+                tasks = [
+                    self._fetch_sales(client, postcode, prop_type, start_date, 20)
+                    for prop_type in ["terraced", "semi-detached", "detached"]
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, list):
+                        all_sales.extend(result)
 
-            # If STILL not enough, search without property type filter
-            if len(all_sales) < 5:
+            # Only use unfiltered search as last resort
+            if len(all_sales) < 3:
                 logger.info("Searching all sales without property type filter", postcode=postcode)
                 extra_sales = await self._fetch_sales_no_type(client, postcode, start_date, 30)
                 all_sales.extend(extra_sales)
 
-            # Remove duplicates and sort by date
-            seen = set()
-            unique_sales = []
-            for sale in all_sales:
-                key = (sale.address, sale.price, sale.sale_date.date())
-                if key not in seen:
-                    seen.add(key)
-                    unique_sales.append(sale)
-
+            # Final deduplication and sort
+            unique_sales = self._deduplicate_sales(all_sales)
             unique_sales.sort(key=lambda s: s.sale_date, reverse=True)
-            return unique_sales[:max_results]
+            result = unique_sales[:max_results]
+
+            # Cache the result
+            _cache[cache_key] = (result, datetime.now())
+
+            return result
+
+    def _deduplicate_sales(self, sales: list[ComparableSale]) -> list[ComparableSale]:
+        """Remove duplicate sales based on address, price, and date."""
+        seen = set()
+        unique = []
+        for sale in sales:
+            key = (sale.address, sale.price, sale.sale_date.date())
+            if key not in seen:
+                seen.add(key)
+                unique.append(sale)
+        return unique
 
     async def _fetch_sales(
         self,
