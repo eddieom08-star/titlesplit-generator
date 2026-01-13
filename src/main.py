@@ -62,6 +62,40 @@ async def root():
     }
 
 
+@app.get("/debug/schema")
+async def debug_schema():
+    """Debug endpoint to check database schema."""
+    from sqlalchemy import text
+    from src.database import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+            )
+            tables = [row[0] for row in result.fetchall()]
+
+            mi_columns = []
+            if "manual_inputs" in tables:
+                col_result = await session.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'manual_inputs'")
+                )
+                mi_columns = [row[0] for row in col_result.fetchall()]
+
+            alembic_version = None
+            if "alembic_version" in tables:
+                ver_result = await session.execute(text("SELECT version_num FROM alembic_version"))
+                row = ver_result.fetchone()
+                alembic_version = row[0] if row else None
+
+            return {
+                "tables": tables,
+                "manual_inputs_columns": mi_columns,
+                "alembic_version": alembic_version,
+            }
+    except Exception as e:
+        return {"error": str(e), "error_type": type(e).__name__}
+
+
 # Include routers
 app.include_router(opportunities_router, prefix="/api")
 app.include_router(scraper_router, prefix="/api")
