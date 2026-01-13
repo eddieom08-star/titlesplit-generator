@@ -10,9 +10,11 @@ import {
   PropertyDetail,
   RecalculatedAnalysis,
   GDVReport,
+  FloorplanAnalysis,
   getPropertyDetail,
   updateManualInput,
   generateGDVReport,
+  uploadFloorplan,
   formatPrice,
   getScoreColor,
 } from '@/lib/api';
@@ -25,9 +27,12 @@ export default function PropertyDetailPage() {
   const [property, setProperty] = useState<PropertyDetail | null>(null);
   const [analysis, setAnalysis] = useState<RecalculatedAnalysis | null>(null);
   const [gdvReport, setGdvReport] = useState<GDVReport | null>(null);
+  const [floorplanAnalysis, setFloorplanAnalysis] = useState<FloorplanAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
+  const [uploadingFloorplan, setUploadingFloorplan] = useState(false);
+  const [floorplanFile, setFloorplanFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Form state
@@ -77,6 +82,7 @@ export default function PropertyDetailPage() {
         if (mi.condition_rating) setConditionRating(mi.condition_rating);
         if (mi.structural_concerns) setStructuralConcerns(mi.structural_concerns);
         if (mi.revised_asking_price) setRevisedPrice(mi.revised_asking_price.toString());
+        if (mi.floorplan_analysis) setFloorplanAnalysis(mi.floorplan_analysis);
       }
     } catch (err) {
       setError('Failed to load property');
@@ -102,6 +108,27 @@ export default function PropertyDetailPage() {
       console.error(err);
     } finally {
       setGeneratingReport(false);
+    }
+  }
+
+  async function handleFloorplanUpload() {
+    if (!floorplanFile) return;
+
+    try {
+      setUploadingFloorplan(true);
+      setError(null);
+
+      const result = await uploadFloorplan(propertyId, floorplanFile);
+      setFloorplanAnalysis(result);
+      setFloorplanFile(null);
+
+      // Refresh property data
+      await loadProperty();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to analyze floorplan');
+      console.error(err);
+    } finally {
+      setUploadingFloorplan(false);
     }
   }
 
@@ -146,6 +173,75 @@ export default function PropertyDetailPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function getPlanningPortalUrl(postcode: string): string {
+    // Use the Planning Portal's search by postcode
+    const encoded = encodeURIComponent(postcode.trim());
+    return `https://www.planningportal.co.uk/find-your-local-planning-authority?postcode=${encoded}`;
+  }
+
+  function downloadReport() {
+    if (!property) return;
+
+    const report = {
+      generated_at: new Date().toISOString(),
+      property: {
+        id: property.id,
+        title: property.title,
+        asking_price: property.asking_price,
+        city: property.city,
+        postcode: property.postcode,
+        estimated_units: property.estimated_units,
+        tenure: property.tenure,
+        tenure_confidence: property.tenure_confidence,
+        opportunity_score: property.opportunity_score,
+        status: property.status,
+        first_seen: property.first_seen,
+        source_url: property.source_url,
+      },
+      manual_inputs: property.manual_inputs,
+      analysis: analysis ? {
+        original_score: analysis.original_score,
+        adjusted_score: analysis.adjusted_score,
+        original_recommendation: analysis.original_recommendation,
+        updated_recommendation: analysis.updated_recommendation,
+        confidence_level: analysis.confidence_level,
+        cost_breakdown: analysis.cost_breakdown,
+        net_benefit_per_unit: analysis.net_benefit_per_unit,
+        blockers: analysis.blockers,
+        warnings: analysis.warnings,
+        positives: analysis.positives,
+      } : null,
+      gdv_report: gdvReport ? {
+        total_gdv: gdvReport.total_gdv,
+        gdv_range_low: gdvReport.gdv_range_low,
+        gdv_range_high: gdvReport.gdv_range_high,
+        gdv_confidence: gdvReport.gdv_confidence,
+        gross_uplift: gdvReport.gross_uplift,
+        gross_uplift_percent: gdvReport.gross_uplift_percent,
+        net_uplift: gdvReport.net_uplift,
+        net_uplift_percent: gdvReport.net_uplift_percent,
+        net_profit_per_unit: gdvReport.net_profit_per_unit,
+        total_costs: gdvReport.total_costs,
+        unit_valuations: gdvReport.unit_valuations,
+        comparables_summary: gdvReport.comparables_summary,
+        confidence_statement: gdvReport.confidence_statement,
+        limitations: gdvReport.limitations,
+        data_sources: gdvReport.data_sources,
+      } : null,
+      floorplan_analysis: floorplanAnalysis,
+    };
+
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `property-report-${property.postcode?.replace(/\s+/g, '-') || property.id}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   if (loading) {
@@ -217,7 +313,7 @@ export default function PropertyDetailPage() {
                 <p className="text-sm">{new Date(property.first_seen).toLocaleDateString()}</p>
               </div>
             </div>
-            <div className="mt-4">
+            <div className="mt-4 flex flex-wrap items-center gap-4">
               <a
                 href={property.source_url}
                 target="_blank"
@@ -226,6 +322,24 @@ export default function PropertyDetailPage() {
               >
                 View Original Listing &rarr;
               </a>
+              {property.postcode && (
+                <a
+                  href={getPlanningPortalUrl(property.postcode)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-purple-600 hover:underline"
+                >
+                  Planning Portal &rarr;
+                </a>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadReport}
+                className="ml-auto"
+              >
+                Download Report (JSON)
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -411,6 +525,132 @@ export default function PropertyDetailPage() {
                         onChange={(e) => setStructuralConcerns(e.target.value)}
                       />
                     </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Floorplan Analysis Section */}
+            <div className="border-b pb-4">
+              <h3 className="font-semibold mb-3">Floorplan Analysis</h3>
+              <p className="text-sm text-gray-500 mb-3">
+                Upload a floorplan image for AI-powered room detection and layout analysis
+              </p>
+              <div className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <Input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={(e) => setFloorplanFile(e.target.files?.[0] || null)}
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={handleFloorplanUpload}
+                    disabled={!floorplanFile || uploadingFloorplan}
+                    variant="outline"
+                  >
+                    {uploadingFloorplan ? 'Analyzing...' : 'Analyze'}
+                  </Button>
+                </div>
+                {floorplanFile && (
+                  <p className="text-sm text-gray-500">
+                    Selected: {floorplanFile.name} ({(floorplanFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
+
+                {/* Existing Floorplan Analysis Results */}
+                {floorplanAnalysis && (
+                  <div className="space-y-3 mt-4">
+                    <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <p className="font-semibold text-purple-800">Floorplan Analysis Results</p>
+                          {floorplanAnalysis.analyzed_at && (
+                            <p className="text-xs text-purple-600">
+                              Analyzed: {new Date(floorplanAnalysis.analyzed_at).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                        <Badge
+                          variant={floorplanAnalysis.suitable_for_title_split ? 'default' : 'destructive'}
+                        >
+                          {floorplanAnalysis.suitable_for_title_split ? 'Suitable' : 'Not Suitable'}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-3">
+                        <div>
+                          <p className="text-xs text-gray-500">Units Detected</p>
+                          <p className="text-xl font-bold text-purple-700">{floorplanAnalysis.units_detected}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Confidence</p>
+                          <p className="font-semibold">{Math.round(floorplanAnalysis.confidence * 100)}%</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Self-Contained</p>
+                          <p className="font-semibold">
+                            {floorplanAnalysis.self_contained_assessment.all_self_contained ? 'Yes' : 'No'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Unit Details */}
+                    {floorplanAnalysis.units.length > 0 && (
+                      <div className="p-4 bg-gray-50 border rounded-lg">
+                        <p className="font-semibold mb-2">Unit Breakdown</p>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-left text-gray-500 border-b">
+                                <th className="pb-2">Unit</th>
+                                <th className="pb-2">Layout</th>
+                                <th className="pb-2 text-center">Beds</th>
+                                <th className="pb-2 text-center">Baths</th>
+                                <th className="pb-2 text-center">Reception</th>
+                                <th className="pb-2">Notes</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {floorplanAnalysis.units.map((unit, i) => (
+                                <tr key={i} className="border-b border-gray-100">
+                                  <td className="py-2 font-medium">{unit.unit_id}</td>
+                                  <td className="py-2">{unit.layout_type}</td>
+                                  <td className="py-2 text-center">{unit.bedrooms}</td>
+                                  <td className="py-2 text-center">{unit.bathrooms}</td>
+                                  <td className="py-2 text-center">{unit.reception_rooms}</td>
+                                  <td className="py-2 text-xs text-gray-500">{unit.notes || '-'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Concerns */}
+                    {(floorplanAnalysis.layout_concerns.length > 0 ||
+                      floorplanAnalysis.self_contained_assessment.concerns.length > 0) && (
+                      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                        <p className="font-semibold text-yellow-800 mb-2">Concerns</p>
+                        <ul className="text-sm text-yellow-700 space-y-1">
+                          {floorplanAnalysis.self_contained_assessment.concerns.map((c, i) => (
+                            <li key={`sc-${i}`}>- {c}</li>
+                          ))}
+                          {floorplanAnalysis.layout_concerns.map((c, i) => (
+                            <li key={`lc-${i}`}>- {c}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Analysis Notes */}
+                    {floorplanAnalysis.analysis_notes && (
+                      <div className="p-4 bg-gray-100 border rounded-lg">
+                        <p className="font-semibold mb-2">Analysis Notes</p>
+                        <p className="text-sm text-gray-600">{floorplanAnalysis.analysis_notes}</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -171,6 +171,12 @@ class ManualInput(Base):
     access_issues: Mapped[Optional[str]] = mapped_column(Text)
     structural_concerns: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Floorplan Analysis (Claude Vision)
+    floorplan_base64: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    floorplan_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    floorplan_analysis: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    floorplan_analyzed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Financial Adjustments
     revised_asking_price: Mapped[Optional[int]] = mapped_column(Integer)
     additional_costs_identified: Mapped[Optional[dict]] = mapped_column(JSON)

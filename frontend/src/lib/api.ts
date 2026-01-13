@@ -234,6 +234,9 @@ export interface ManualInput {
   condition_rating: string | null;
   access_issues: string | null;
   structural_concerns: string | null;
+  floorplan_filename: string | null;
+  floorplan_analysis: FloorplanAnalysis | null;
+  floorplan_analyzed_at: string | null;
   revised_asking_price: number | null;
   additional_costs_identified: Record<string, number> | null;
   deal_status: string;
@@ -447,6 +450,70 @@ export async function generateGDVReport(
     clearTimeout(timeoutId);
     if (err instanceof Error && err.name === 'AbortError') {
       throw new Error('Request timed out - please try again (server may be starting up)');
+    }
+    throw err;
+  }
+}
+
+// ============================================================
+// Floorplan Analysis Types & Functions
+// ============================================================
+
+export interface FloorplanUnit {
+  unit_id: string;
+  layout_type: string;
+  bedrooms: number;
+  bathrooms: number;
+  reception_rooms: number;
+  has_kitchen: boolean;
+  estimated_sqft: number | null;
+  notes: string;
+}
+
+export interface FloorplanAnalysis {
+  units_detected: number;
+  confidence: number;
+  units: FloorplanUnit[];
+  self_contained_assessment: {
+    all_self_contained: boolean;
+    concerns: string[];
+    evidence: string;
+  };
+  layout_concerns: string[];
+  suitable_for_title_split: boolean;
+  analysis_notes: string;
+  analyzed_at: string;
+}
+
+export async function uploadFloorplan(
+  propertyId: string,
+  file: File
+): Promise<FloorplanAnalysis> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  // 60 second timeout for Claude Vision analysis
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const res = await fetch(`${API_URL}/api/properties/${propertyId}/floorplan`, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Floorplan analysis failed' }));
+      throw new Error(error.detail || 'Failed to analyze floorplan');
+    }
+    return res.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Analysis timed out - please try again');
     }
     throw err;
   }

@@ -1,9 +1,10 @@
 """API endpoints for property details, manual inputs, and GDV reports."""
+import base64
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, File, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -15,6 +16,7 @@ from src.services.propertydata import calculate_title_split_potential
 from src.data_sources.land_registry import LandRegistryClient
 from src.data_sources.epc import EPCClient
 from src.analysis.gdv_calculator import GDVCalculator, BlockGDVReport, UnitValuation, ValuationConfidence
+from src.analysis.floorplan_analyzer import FloorplanAnalyzer
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/properties", tags=["properties"])
@@ -106,6 +108,18 @@ class PropertyDetail(BaseModel):
     manual_inputs: Optional[dict] = None
     # Analysis
     analysis: Optional[dict] = None
+
+
+class FloorplanAnalysisResponse(BaseModel):
+    """Response from floorplan analysis."""
+    units_detected: int
+    confidence: float
+    units: list[dict]
+    self_contained_assessment: dict
+    layout_concerns: list[str]
+    suitable_for_title_split: bool
+    analysis_notes: str
+    analyzed_at: str
 
 
 @router.get("/{property_id}", response_model=PropertyDetail)
@@ -544,6 +558,9 @@ def _serialize_manual_input(mi: ManualInput) -> dict:
         "condition_rating": mi.condition_rating,
         "access_issues": mi.access_issues,
         "structural_concerns": mi.structural_concerns,
+        "floorplan_filename": mi.floorplan_filename,
+        "floorplan_analysis": mi.floorplan_analysis,
+        "floorplan_analyzed_at": mi.floorplan_analyzed_at.isoformat() if mi.floorplan_analyzed_at else None,
         "revised_asking_price": mi.revised_asking_price,
         "additional_costs_identified": mi.additional_costs_identified,
         "negotiation_notes": mi.negotiation_notes,
@@ -817,3 +834,112 @@ async def delete_property(property_id: UUID, permanent: bool = False):
             property.archived = True
             await session.commit()
             return {"status": "archived", "property_id": str(property_id)}
+
+
+# ============================================================
+# Floorplan Upload & Analysis
+# ============================================================
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
+
+@router.post("/{property_id}/floorplan", response_model=FloorplanAnalysisResponse)
+async def analyze_floorplan(property_id: UUID, file: UploadFile = File(...)):
+    """
+    Upload and analyze a floorplan image using Claude Vision.
+
+    Accepts: JPEG, PNG, WebP, GIF (max 5MB)
+
+    Returns room counts and layout analysis:
+    - Number of units detected
+    - Room breakdown per unit (beds, baths, reception)
+    - Self-containment assessment
+    - Suitability for title split
+    """
+    # Validate file type
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_IMAGE_TYPES)}"
+        )
+
+    # Read and validate file size
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
+        )
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Property)
+            .options(selectinload(Property.manual_inputs))
+            .where(Property.id == property_id)
+        )
+        property = result.scalar_one_or_none()
+
+        if not property:
+            raise HTTPException(status_code=404, detail="Property not found")
+
+        # Get or create manual input record
+        if property.manual_inputs:
+            manual_input = property.manual_inputs[0]
+        else:
+            manual_input = ManualInput(property_id=property_id)
+            session.add(manual_input)
+
+        # Convert to base64
+        image_base64 = base64.b64encode(content).decode("utf-8")
+
+        # Analyze with Claude Vision
+        logger.info("Analyzing floorplan", property_id=str(property_id), filename=file.filename)
+        analyzer = FloorplanAnalyzer()
+
+        try:
+            analysis = await analyzer.analyze(image_base64, file.content_type)
+        except Exception as e:
+            logger.error("Floorplan analysis failed", error=str(e))
+            raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+        # Store results
+        manual_input.floorplan_base64 = image_base64
+        manual_input.floorplan_filename = file.filename
+        manual_input.floorplan_analysis = analyzer.analysis_to_dict(analysis)
+        manual_input.floorplan_analyzed_at = analysis.analyzed_at
+
+        await session.commit()
+
+        logger.info(
+            "Floorplan analysis complete",
+            property_id=str(property_id),
+            units_detected=analysis.units_detected
+        )
+
+        return FloorplanAnalysisResponse(
+            units_detected=analysis.units_detected,
+            confidence=analysis.confidence,
+            units=[
+                {
+                    "unit_id": u.unit_id,
+                    "layout_type": u.layout_type,
+                    "bedrooms": u.bedrooms,
+                    "bathrooms": u.bathrooms,
+                    "reception_rooms": u.reception_rooms,
+                    "has_kitchen": u.has_kitchen,
+                    "estimated_sqft": u.estimated_sqft,
+                    "notes": u.notes,
+                }
+                for u in analysis.units
+            ],
+            self_contained_assessment={
+                "all_self_contained": analysis.self_contained_assessment.all_self_contained,
+                "concerns": analysis.self_contained_assessment.concerns,
+                "evidence": analysis.self_contained_assessment.evidence,
+            },
+            layout_concerns=analysis.layout_concerns,
+            suitable_for_title_split=analysis.suitable_for_title_split,
+            analysis_notes=analysis.analysis_notes,
+            analyzed_at=analysis.analyzed_at.isoformat(),
+        )
