@@ -2,10 +2,149 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+import structlog
 from pydantic import BaseModel, Field
 
 from src.data_sources.epc import EPCRecord
 from src.data_sources.land_registry import ComparableSale, calculate_time_adjusted_price
+
+logger = structlog.get_logger()
+
+
+class ValuationValidationError(Exception):
+    """Raised when valuation fails sanity checks."""
+    pass
+
+
+def validate_unit_value_against_rent(
+    estimated_value: int,
+    monthly_rent: int,
+    min_yield: float = 0.05,
+    max_yield: float = 0.10,
+) -> dict:
+    """
+    Cross-check unit value against rental yield.
+
+    If the implied yield is outside a reasonable range (5-10%),
+    the valuation is likely wrong.
+
+    Returns:
+        dict with validation result and corrected value if needed
+    """
+    if monthly_rent <= 0 or estimated_value <= 0:
+        return {"valid": True, "skipped": True, "reason": "missing rent or value data"}
+
+    annual_rent = monthly_rent * 12
+    implied_yield = annual_rent / estimated_value
+
+    # If yield is too low, the value is too high
+    if implied_yield < min_yield:
+        # Calculate what the value should be at minimum yield
+        corrected_value = int(annual_rent / min_yield)
+        return {
+            "valid": False,
+            "issue": "value_too_high",
+            "original_value": estimated_value,
+            "corrected_value": corrected_value,
+            "implied_yield": round(implied_yield * 100, 2),
+            "expected_yield_range": f"{min_yield*100:.0f}%-{max_yield*100:.0f}%",
+            "message": f"Value £{estimated_value:,} implies {implied_yield*100:.1f}% yield - too low for this area",
+        }
+
+    # If yield is too high, value might be conservative (acceptable)
+    if implied_yield > max_yield:
+        return {
+            "valid": True,
+            "note": "conservative_valuation",
+            "implied_yield": round(implied_yield * 100, 2),
+            "message": f"Value £{estimated_value:,} implies {implied_yield*100:.1f}% yield - may be undervalued",
+        }
+
+    return {
+        "valid": True,
+        "implied_yield": round(implied_yield * 100, 2),
+        "message": f"Yield {implied_yield*100:.1f}% is within expected range",
+    }
+
+
+def sanity_check_gdv(
+    total_gdv: int,
+    asking_price: int,
+    num_units: int,
+    comparables: list[ComparableSale],
+) -> dict:
+    """
+    Perform sanity checks on GDV calculation to catch obvious errors.
+
+    Returns:
+        dict with check results and any warnings/errors
+    """
+    issues = []
+    warnings = []
+
+    gdv_per_unit = total_gdv / num_units if num_units > 0 else 0
+
+    # Check 1: Unit value > block asking price (definitely wrong)
+    if gdv_per_unit > asking_price:
+        issues.append({
+            "check": "unit_exceeds_block_price",
+            "severity": "error",
+            "message": f"Unit value £{gdv_per_unit:,.0f} exceeds block asking price £{asking_price:,}. "
+                      f"Comparables likely include wrong property type (houses vs flats).",
+        })
+
+    # Check 2: GDV > 5x asking price (very suspicious)
+    if total_gdv > asking_price * 5:
+        issues.append({
+            "check": "gdv_ratio_extreme",
+            "severity": "error",
+            "message": f"GDV £{total_gdv:,} is {total_gdv/asking_price:.1f}x asking price. "
+                      f"Valuations are almost certainly incorrect.",
+        })
+
+    # Check 3: GDV > 3x asking price (suspicious but possible)
+    elif total_gdv > asking_price * 3:
+        warnings.append({
+            "check": "gdv_ratio_high",
+            "severity": "warning",
+            "message": f"GDV £{total_gdv:,} is {total_gdv/asking_price:.1f}x asking price. "
+                      f"Verify valuations are reasonable for this area.",
+        })
+
+    # Check 4: Mixed property types in comparables
+    if comparables:
+        property_types = set(c.property_type for c in comparables)
+        if len(property_types) > 1 and "F" in property_types:
+            non_flat_count = len([c for c in comparables if c.property_type != "F"])
+            if non_flat_count > 0:
+                warnings.append({
+                    "check": "mixed_property_types",
+                    "severity": "warning",
+                    "message": f"Comparables include {non_flat_count} non-flat properties. "
+                              f"This may skew valuations.",
+                    "property_types": list(property_types),
+                })
+
+    # Check 5: Average comparable price sanity
+    if comparables:
+        avg_comp_price = sum(c.price for c in comparables) / len(comparables)
+        # If average comparable > 3x the per-unit asking price, probably using houses
+        per_unit_asking = asking_price / num_units if num_units > 0 else asking_price
+        if avg_comp_price > per_unit_asking * 3:
+            issues.append({
+                "check": "comparable_price_mismatch",
+                "severity": "error",
+                "message": f"Average comparable £{avg_comp_price:,.0f} is {avg_comp_price/per_unit_asking:.1f}x "
+                          f"per-unit asking price (£{per_unit_asking:,.0f}). "
+                          f"Check if comparables are correct property type.",
+            })
+
+    return {
+        "passed": len(issues) == 0,
+        "issues": issues,
+        "warnings": warnings,
+        "checks_performed": 5,
+    }
 
 
 class ValuationConfidence(str, Enum):
@@ -87,6 +226,7 @@ class BlockGDVReport(BaseModel):
     data_freshness: str = ""
     confidence_statement: str = ""
     limitations: list[str] = Field(default_factory=list)
+    validation_results: dict = Field(default_factory=dict)
     report_date: str = ""
     report_version: str = "1.0"
 
@@ -106,17 +246,32 @@ class GDVCalculator:
         comparables: Optional[list[ComparableSale]] = None,
         epcs: Optional[list[EPCRecord]] = None,
         split_costs: int = 0,
+        monthly_rent_per_unit: Optional[int] = None,
     ) -> BlockGDVReport:
         """Calculate GDV for a block of flats."""
         comparables = comparables or []
         epcs = epcs or []
 
-        # Value each unit
+        # CRITICAL: Filter comparables to FLATS ONLY
+        # This prevents the common error of valuing flats using house prices
+        flat_comparables = [c for c in comparables if c.property_type == "F"]
+
+        if len(flat_comparables) < len(comparables):
+            excluded_count = len(comparables) - len(flat_comparables)
+            logger.warning(
+                "Excluded non-flat comparables from GDV calculation",
+                total_comparables=len(comparables),
+                flat_comparables=len(flat_comparables),
+                excluded=excluded_count,
+                excluded_types=[c.property_type for c in comparables if c.property_type != "F"],
+            )
+
+        # Value each unit using ONLY flat comparables
         unit_valuations = []
         for i, unit in enumerate(units):
             valuation = self._value_unit(
                 unit=unit,
-                comparables=comparables,
+                comparables=flat_comparables,
                 epc=epcs[i] if i < len(epcs) else None,
             )
             unit_valuations.append(valuation)
@@ -137,6 +292,40 @@ class GDVCalculator:
         # Determine confidence
         confidence = self._calculate_overall_confidence(unit_valuations)
 
+        # Run sanity checks on the valuations
+        validation_results = sanity_check_gdv(
+            total_gdv=total_gdv,
+            asking_price=asking_price,
+            num_units=len(units),
+            comparables=flat_comparables,
+        )
+
+        # If rental data available, validate against yield
+        if monthly_rent_per_unit and len(unit_valuations) > 0:
+            avg_unit_value = total_gdv // len(units)
+            yield_check = validate_unit_value_against_rent(
+                estimated_value=avg_unit_value,
+                monthly_rent=monthly_rent_per_unit,
+            )
+            validation_results["rental_yield_check"] = yield_check
+
+            # If yield check fails, add to limitations
+            if not yield_check.get("valid", True) and not yield_check.get("skipped"):
+                logger.warning(
+                    "Valuation failed rental yield check",
+                    estimated_value=avg_unit_value,
+                    monthly_rent=monthly_rent_per_unit,
+                    implied_yield=yield_check.get("implied_yield"),
+                    corrected_value=yield_check.get("corrected_value"),
+                )
+
+        # Add validation issues to limitations
+        limitations = self._get_limitations(confidence, len(flat_comparables))
+        for issue in validation_results.get("issues", []):
+            limitations.append(f"⚠️ {issue['message']}")
+        for warning in validation_results.get("warnings", []):
+            limitations.append(f"⚡ {warning['message']}")
+
         # Generate report
         return BlockGDVReport(
             property_address="",
@@ -156,13 +345,14 @@ class GDVCalculator:
             net_uplift=net_uplift,
             net_uplift_percent=net_uplift_pct,
             net_profit_per_unit=net_uplift // len(units) if units else 0,
-            comparables_summary=self._summarise_comparables(comparables),
+            comparables_summary=self._summarise_comparables(flat_comparables),
             data_sources=["Land Registry Price Paid", "EPC Register"],
             data_freshness=f"Data as of {datetime.now().strftime('%B %Y')}",
             confidence_statement=self._generate_confidence_statement(
-                unit_valuations, comparables
+                unit_valuations, flat_comparables
             ),
-            limitations=self._get_limitations(confidence, len(comparables)),
+            limitations=limitations,
+            validation_results=validation_results,
             report_date=datetime.now().isoformat(),
         )
 
@@ -177,8 +367,9 @@ class GDVCalculator:
         sqft = unit.get("sqft") or (epc.floor_area * 10.764 if epc and epc.floor_area else None)
         unit_id = unit.get("id", "Unit")
 
-        # Filter comparables
-        relevant_comps = comparables[:10]
+        # CRITICAL: Only use FLAT comparables - filter again as safety measure
+        flat_comps = [c for c in comparables if c.property_type == "F"]
+        relevant_comps = flat_comps[:10]
 
         # Calculate value
         if sqft and relevant_comps:

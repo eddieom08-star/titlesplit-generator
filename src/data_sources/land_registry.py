@@ -122,23 +122,46 @@ class LandRegistryClient:
             # Deduplicate early to avoid unnecessary expansion
             all_sales = self._deduplicate_sales(all_sales)
 
-            # If still not enough, try other property types CONCURRENTLY
+            # If still not enough, expand to postcode district (wider area) but KEEP property type
+            # CRITICAL: Never mix property types - flats and houses have very different values
             if len(all_sales) < 5:
-                logger.info("Expanding search to all property types", postcode=postcode)
-                tasks = [
-                    self._fetch_sales(client, postcode, prop_type, start_date, 20)
-                    for prop_type in ["terraced", "semi-detached", "detached"]
-                ]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for result in results:
-                    if isinstance(result, list):
-                        all_sales.extend(result)
+                postcode_district = postcode.split()[0] if " " in postcode else postcode[:-3]
+                logger.info(
+                    "Expanding search to postcode district (same property type)",
+                    postcode=postcode,
+                    district=postcode_district,
+                    property_type=property_type_value,
+                )
+                # Search the entire district with the same property type
+                district_sales = await self._fetch_sales(
+                    client, postcode_district, property_type_value, start_date, 50
+                )
+                all_sales.extend(district_sales)
+                all_sales = self._deduplicate_sales(all_sales)
 
-            # Only use unfiltered search as last resort
+            # If still insufficient, extend time range but KEEP property type filter
             if len(all_sales) < 3:
-                logger.info("Searching all sales without property type filter", postcode=postcode)
-                extra_sales = await self._fetch_sales_no_type(client, postcode, start_date, 30)
-                all_sales.extend(extra_sales)
+                extended_start = end_date - timedelta(days=36 * 30)  # 3 years back
+                logger.info(
+                    "Extending time range to 3 years (same property type)",
+                    postcode=postcode,
+                    property_type=property_type_value,
+                )
+                postcode_district = postcode.split()[0] if " " in postcode else postcode[:-3]
+                older_sales = await self._fetch_sales(
+                    client, postcode_district, property_type_value, extended_start, 50
+                )
+                all_sales.extend(older_sales)
+                all_sales = self._deduplicate_sales(all_sales)
+
+            # Log warning if we have very few comparables - DO NOT fall back to different property types
+            if len(all_sales) < 3:
+                logger.warning(
+                    "Insufficient comparables for property type - valuations may be unreliable",
+                    postcode=postcode,
+                    property_type=property_type,
+                    comparable_count=len(all_sales),
+                )
 
             # Final deduplication and sort
             unique_sales = self._deduplicate_sales(all_sales)
