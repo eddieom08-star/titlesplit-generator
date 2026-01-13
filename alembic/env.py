@@ -12,8 +12,8 @@ from src.models import Property, UnitEPC, Comparable, Analysis, ManualInput  # n
 config = context.config
 settings = get_settings()
 
-# Override sqlalchemy.url with environment variable
-config.set_main_option("sqlalchemy.url", settings.database_url_sync)
+# Override sqlalchemy.url with environment variable (async URL for asyncpg)
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -48,6 +48,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={"ssl": True},  # Required for Neon/cloud databases
     )
 
     async with connectable.connect() as connection:
