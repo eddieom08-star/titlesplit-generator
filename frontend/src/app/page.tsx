@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Opportunity, AnalysisResult, ValuationResult, OpportunityFilters, getOpportunities, formatPrice, getScoreColor, triggerScrape, clearDemoData, analyzeUrl, getValuation, archiveProperty } from '@/lib/api';
+import { Opportunity, AnalysisResult, ValuationResult, OpportunityFilters, getOpportunities, formatPrice, getScoreColor, triggerScrape, analyzeUrl, getValuation, archiveProperty } from '@/lib/api';
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -59,21 +59,6 @@ export default function Dashboard() {
       setTimeout(() => loadOpportunities(), 5000);
     } catch (err) {
       setScrapeMessage('Failed to trigger scrape');
-      console.error(err);
-    } finally {
-      setScraping(false);
-    }
-  }
-
-  async function handleClearDemoData() {
-    try {
-      setScraping(true);
-      setScrapeMessage(null);
-      const result = await clearDemoData();
-      setScrapeMessage(`Cleared ${result.count} demo properties`);
-      await loadOpportunities();
-    } catch (err) {
-      setScrapeMessage('Failed to clear demo data');
       console.error(err);
     } finally {
       setScraping(false);
@@ -165,14 +150,6 @@ export default function Dashboard() {
               )}
             </div>
             <div className="flex gap-2">
-              <Button
-                onClick={handleClearDemoData}
-                disabled={scraping}
-                variant="outline"
-                size="sm"
-              >
-                Clear Demo
-              </Button>
               <Button
                 onClick={handleTriggerScrape}
                 disabled={scraping}
