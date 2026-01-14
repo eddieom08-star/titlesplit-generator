@@ -50,7 +50,7 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "0.1.0", "build": "2026-01-13-v6"}
+    return {"status": "healthy", "version": "0.1.0", "build": "2026-01-13-v7-force"}
 
 
 @app.get("/")
