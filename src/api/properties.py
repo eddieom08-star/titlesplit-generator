@@ -613,6 +613,8 @@ def _serialize_manual_input(mi: ManualInput) -> dict:
         "floorplan_filename": mi.floorplan_filename,
         "floorplan_analysis": mi.floorplan_analysis,
         "floorplan_analyzed_at": mi.floorplan_analyzed_at.isoformat() if mi.floorplan_analyzed_at else None,
+        "gdv_report": mi.gdv_report,
+        "gdv_report_generated_at": mi.gdv_report_generated_at.isoformat() if mi.gdv_report_generated_at else None,
         "revised_asking_price": mi.revised_asking_price,
         "additional_costs_identified": mi.additional_costs_identified,
         "negotiation_notes": mi.negotiation_notes,
@@ -702,7 +704,7 @@ _GDV_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
 @router.post("/{property_id}/gdv-report", response_model=GDVReportResponse)
-async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
+async def generate_gdv_report(property_id: UUID, request: GDVReportRequest, force_regenerate: bool = False):
     """
     Generate a lender-grade GDV report for a property.
 
@@ -721,10 +723,12 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
     - PropertyData.co.uk (AVM, £/sqft analysis)
     - UK House Price Index (time adjustments)
     - EPC Register (floor areas, energy ratings)
+
+    Set force_regenerate=true to bypass cached/saved report.
     """
-    # Check cache first
+    # Check in-memory cache first (for rapid repeat requests)
     cache_key = f"{property_id}:{request.refurbishment_budget or 0}"
-    if cache_key in _gdv_report_cache:
+    if not force_regenerate and cache_key in _gdv_report_cache:
         cached_report, cached_time = _gdv_report_cache[cache_key]
         if (datetime.now() - cached_time).total_seconds() < _GDV_CACHE_TTL_SECONDS:
             logger.info("GDV report cache hit", property_id=str(property_id))
@@ -744,14 +748,31 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
         if not property.postcode:
             raise HTTPException(status_code=400, detail="Property postcode required for GDV report")
 
-        # Get effective values (prefer manual inputs)
+        # Get or create manual input record
         manual_input = property.manual_inputs[0] if property.manual_inputs else None
+        if not manual_input:
+            manual_input = ManualInput(property_id=property_id)
+            session.add(manual_input)
+            await session.flush()  # Ensure ID is assigned
+
+        # Check for saved GDV report in database (unless force_regenerate)
+        if not force_regenerate and manual_input.gdv_report and manual_input.gdv_report_generated_at:
+            # Return saved report if within 24 hours
+            saved_age = (datetime.utcnow() - manual_input.gdv_report_generated_at).total_seconds()
+            if saved_age < 86400:  # 24 hours
+                logger.info("Returning saved GDV report", property_id=str(property_id), age_hours=saved_age/3600)
+                saved_report = GDVReportResponse(**manual_input.gdv_report)
+                # Also update in-memory cache
+                _gdv_report_cache[cache_key] = (saved_report, datetime.now())
+                return saved_report
+
+        # Get effective values (prefer manual inputs)
         effective_units = (
-            manual_input.verified_units if manual_input and manual_input.verified_units
+            manual_input.verified_units if manual_input.verified_units
             else property.estimated_units
         )
         effective_price = (
-            manual_input.revised_asking_price if manual_input and manual_input.revised_asking_price
+            manual_input.revised_asking_price if manual_input.revised_asking_price
             else property.asking_price
         )
 
@@ -843,9 +864,14 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
             report_date=report.report_date,
         )
 
-        # Cache the response
+        # Save to database for persistence
+        manual_input.gdv_report = response.model_dump()
+        manual_input.gdv_report_generated_at = datetime.utcnow()
+        await session.commit()
+        logger.info("GDV report saved to database", property_id=str(property_id))
+
+        # Cache the response in memory
         _gdv_report_cache[cache_key] = (response, datetime.now())
-        logger.info("GDV report cached", property_id=str(property_id))
 
         return response
 

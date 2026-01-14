@@ -177,6 +177,10 @@ class ManualInput(Base):
     floorplan_analysis: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     floorplan_analyzed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # GDV Report (cached)
+    gdv_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    gdv_report_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Financial Adjustments
     revised_asking_price: Mapped[Optional[int]] = mapped_column(Integer)
     additional_costs_identified: Mapped[Optional[dict]] = mapped_column(JSON)
