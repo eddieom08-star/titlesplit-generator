@@ -651,6 +651,7 @@ class ComparableDetail(BaseModel):
     sale_date: str
     property_type: str
     tenure: str
+    land_registry_url: str
 
 
 class GDVReportResponse(BaseModel):
@@ -784,6 +785,7 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
         )
 
         # Serialize comparables for response
+        from urllib.parse import quote
         serialized_comparables = [
             ComparableDetail(
                 address=c.address,
@@ -792,6 +794,7 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
                 sale_date=c.sale_date.strftime("%Y-%m-%d") if c.sale_date else "",
                 property_type={"F": "Flat", "T": "Terraced", "S": "Semi-detached", "D": "Detached"}.get(c.property_type, c.property_type),
                 tenure={"F": "Freehold", "L": "Leasehold"}.get(c.estate_type, c.estate_type),
+                land_registry_url=f"https://landregistry.data.gov.uk/app/ppd?postcode={quote(c.postcode)}",
             )
             for c in comparables[:15]  # Limit to 15 for UI display
         ]

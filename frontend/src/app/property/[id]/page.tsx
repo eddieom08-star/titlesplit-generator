@@ -173,7 +173,7 @@ ${gdvReport.comparables && gdvReport.comparables.length > 0 ? `### Land Registry
 
 | Address | Price | Date | Type | Tenure |
 |---------|-------|------|------|--------|
-${gdvReport.comparables.map(c => `| ${c.address} | ${formatPrice(c.price)} | ${c.sale_date} | ${c.property_type} | ${c.tenure} |`).join('\n')}` : ''}
+${gdvReport.comparables.map(c => `| [${c.address}](${c.land_registry_url}) | ${formatPrice(c.price)} | ${c.sale_date} | ${c.property_type} | ${c.tenure} |`).join('\n')}` : ''}
 
 ---
 
@@ -1092,7 +1092,16 @@ ${gdvReport.limitations.map(l => `- ${l}`).join('\n')}
                         <tbody>
                           {gdvReport.comparables.map((comp, i) => (
                             <tr key={i} className="border-b border-blue-100">
-                              <td className="py-2 text-xs">{comp.address}</td>
+                              <td className="py-2 text-xs">
+                                <a
+                                  href={comp.land_registry_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {comp.address}
+                                </a>
+                              </td>
                               <td className="py-2 text-right font-semibold">{formatPrice(comp.price)}</td>
                               <td className="py-2 text-center text-xs text-gray-500">{comp.sale_date}</td>
                               <td className="py-2 text-center text-xs">{comp.property_type}</td>

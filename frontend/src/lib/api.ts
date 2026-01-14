@@ -406,6 +406,7 @@ export interface GDVReport {
     sale_date: string;
     property_type: string;
     tenure: string;
+    land_registry_url: string;
   }[];
 
   // Report metadata
