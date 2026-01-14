@@ -58,6 +58,7 @@ export default function PropertyDetailPage() {
   async function loadProperty() {
     try {
       setLoading(true);
+      setError(null);
       const data = await getPropertyDetail(propertyId);
       setProperty(data);
 
@@ -85,8 +86,9 @@ export default function PropertyDetailPage() {
         if (mi.floorplan_analysis) setFloorplanAnalysis(mi.floorplan_analysis);
       }
     } catch (err) {
-      setError('Failed to load property');
-      console.error(err);
+      const message = err instanceof Error ? err.message : 'Failed to load property';
+      setError(`Error loading property: ${message}. The backend may be experiencing issues.`);
+      console.error('Property load error:', err);
     } finally {
       setLoading(false);
     }
@@ -252,10 +254,16 @@ export default function PropertyDetailPage() {
     );
   }
 
-  if (!property) {
+  if (error || !property) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-red-500">{error || 'Property not found'}</p>
+      <div className="min-h-screen flex items-center justify-center flex-col gap-4 p-8">
+        <p className="text-red-500 text-center max-w-md">{error || 'Property not found'}</p>
+        <Button variant="outline" onClick={() => router.push('/')}>
+          &larr; Back to Dashboard
+        </Button>
+        <Button variant="ghost" onClick={() => loadProperty()}>
+          Retry
+        </Button>
       </div>
     );
   }
