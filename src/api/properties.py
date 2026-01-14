@@ -1,4 +1,5 @@
 """API endpoints for property details, manual inputs, and GDV reports."""
+import asyncio
 import base64
 from typing import Optional
 from uuid import UUID
@@ -695,6 +696,11 @@ class GDVReportResponse(BaseModel):
     report_date: str
 
 
+# GDV Report cache - 1 hour TTL
+_gdv_report_cache: dict[str, tuple[GDVReportResponse, datetime]] = {}
+_GDV_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+
 @router.post("/{property_id}/gdv-report", response_model=GDVReportResponse)
 async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
     """
@@ -716,6 +722,14 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
     - UK House Price Index (time adjustments)
     - EPC Register (floor areas, energy ratings)
     """
+    # Check cache first
+    cache_key = f"{property_id}:{request.refurbishment_budget or 0}"
+    if cache_key in _gdv_report_cache:
+        cached_report, cached_time = _gdv_report_cache[cache_key]
+        if (datetime.now() - cached_time).total_seconds() < _GDV_CACHE_TTL_SECONDS:
+            logger.info("GDV report cache hit", property_id=str(property_id))
+            return cached_report
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Property)
@@ -757,17 +771,16 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
         lr_client = LandRegistryClient()
         epc_client = EPCClient()
 
-        # Get comparables
-        logger.info("Fetching Land Registry comparables", postcode=property.postcode)
-        comparables = await lr_client.get_comparable_sales(
+        # Fetch Land Registry comparables and EPC data CONCURRENTLY
+        logger.info("Fetching comparables and EPC data concurrently", postcode=property.postcode)
+        comparables_task = lr_client.get_comparable_sales(
             postcode=property.postcode,
             property_type="F",  # Flats
             months_back=18,
         )
+        epc_task = epc_client.search_by_postcode(property.postcode)
 
-        # Get EPC data if available
-        logger.info("Fetching EPC records", postcode=property.postcode)
-        epcs = await epc_client.search_by_postcode(property.postcode)
+        comparables, epcs = await asyncio.gather(comparables_task, epc_task)
 
         # Initialize calculator and generate report
         calculator = GDVCalculator(
@@ -800,7 +813,7 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
         ]
 
         # Build response
-        return GDVReportResponse(
+        response = GDVReportResponse(
             property_address=property.title or property.address_line1 or "",
             postcode=property.postcode,
             title_number=request.title_number or (manual_input.title_number if manual_input else None),
@@ -829,6 +842,12 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
             limitations=report.limitations,
             report_date=report.report_date,
         )
+
+        # Cache the response
+        _gdv_report_cache[cache_key] = (response, datetime.now())
+        logger.info("GDV report cached", property_id=str(property_id))
+
+        return response
 
 
 def _serialize_unit_valuation(uv: UnitValuation) -> dict:

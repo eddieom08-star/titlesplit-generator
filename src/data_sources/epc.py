@@ -14,7 +14,7 @@ logger = structlog.get_logger()
 
 # In-memory cache for EPC results (TTL-based)
 _epc_cache: dict[str, tuple[list, datetime]] = {}
-_EPC_CACHE_TTL_SECONDS = 3600  # 1 hour cache
+_EPC_CACHE_TTL_SECONDS = 21600  # 6 hour cache - EPC data rarely changes
 
 
 @dataclass

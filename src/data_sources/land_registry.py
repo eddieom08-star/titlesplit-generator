@@ -10,7 +10,7 @@ logger = structlog.get_logger()
 
 # In-memory cache for Land Registry results (TTL-based)
 _cache: dict[str, tuple[list, datetime]] = {}
-_CACHE_TTL_SECONDS = 3600  # 1 hour cache
+_CACHE_TTL_SECONDS = 21600  # 6 hour cache - Land Registry data updates monthly
 
 
 @dataclass
