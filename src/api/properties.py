@@ -643,6 +643,16 @@ class GDVReportRequest(BaseModel):
     title_number: Optional[str] = Field(None, description="Land Registry title number")
 
 
+class ComparableDetail(BaseModel):
+    """Individual comparable sale for display."""
+    address: str
+    postcode: str
+    price: int
+    sale_date: str
+    property_type: str
+    tenure: str
+
+
 class GDVReportResponse(BaseModel):
     """Lender-grade GDV report response."""
     property_address: str
@@ -674,6 +684,7 @@ class GDVReportResponse(BaseModel):
     # Market context
     local_market_data: dict
     comparables_summary: dict
+    comparables: list[ComparableDetail] = []
 
     # Report metadata
     data_sources: list[str]
@@ -772,6 +783,19 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
             split_costs=request.refurbishment_budget or 0,
         )
 
+        # Serialize comparables for response
+        serialized_comparables = [
+            ComparableDetail(
+                address=c.address,
+                postcode=c.postcode,
+                price=c.price,
+                sale_date=c.sale_date.strftime("%Y-%m-%d") if c.sale_date else "",
+                property_type={"F": "Flat", "T": "Terraced", "S": "Semi-detached", "D": "Detached"}.get(c.property_type, c.property_type),
+                tenure={"F": "Freehold", "L": "Leasehold"}.get(c.estate_type, c.estate_type),
+            )
+            for c in comparables[:15]  # Limit to 15 for UI display
+        ]
+
         # Build response
         return GDVReportResponse(
             property_address=property.title or property.address_line1 or "",
@@ -795,6 +819,7 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest):
             net_profit_per_unit=report.net_profit_per_unit,
             local_market_data=report.local_market_data,
             comparables_summary=report.comparables_summary,
+            comparables=serialized_comparables,
             data_sources=report.data_sources,
             data_freshness=report.data_freshness,
             confidence_statement=report.confidence_statement,

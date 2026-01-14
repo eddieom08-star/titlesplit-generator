@@ -399,6 +399,14 @@ export interface GDVReport {
     median?: number;
     message?: string;
   };
+  comparables: {
+    address: string;
+    postcode: string;
+    price: number;
+    sale_date: string;
+    property_type: string;
+    tenure: string;
+  }[];
 
   // Report metadata
   data_sources: string[];

@@ -169,6 +169,12 @@ ${gdvReport.comparables_summary.price_range ? `- **Price Range:** ${gdvReport.co
 ${gdvReport.comparables_summary.average ? `- **Average:** ${formatPrice(gdvReport.comparables_summary.average)}` : ''}
 ${gdvReport.comparables_summary.median ? `- **Median:** ${formatPrice(gdvReport.comparables_summary.median)}` : ''}
 
+${gdvReport.comparables && gdvReport.comparables.length > 0 ? `### Land Registry Transactions
+
+| Address | Price | Date | Type | Tenure |
+|---------|-------|------|------|--------|
+${gdvReport.comparables.map(c => `| ${c.address} | ${formatPrice(c.price)} | ${c.sale_date} | ${c.property_type} | ${c.tenure} |`).join('\n')}` : ''}
+
 ---
 
 ## Confidence Statement
@@ -1044,7 +1050,7 @@ ${gdvReport.limitations.map(l => `- ${l}`).join('\n')}
                 {/* Comparables Summary */}
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                   <p className="font-semibold text-blue-800 mb-2">Comparable Evidence</p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
                     <div>
                       <p className="text-xs text-gray-500">Total Comparables</p>
                       <p className="font-semibold">{gdvReport.comparables_summary.count}</p>
@@ -1068,6 +1074,35 @@ ${gdvReport.limitations.map(l => `- ${l}`).join('\n')}
                       </div>
                     )}
                   </div>
+
+                  {/* Individual Comparables Table */}
+                  {gdvReport.comparables && gdvReport.comparables.length > 0 && (
+                    <div className="overflow-x-auto border-t border-blue-200 pt-3">
+                      <p className="text-xs text-blue-700 mb-2 font-medium">Land Registry Transactions</p>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-500 border-b">
+                            <th className="pb-2">Address</th>
+                            <th className="pb-2 text-right">Price</th>
+                            <th className="pb-2 text-center">Date</th>
+                            <th className="pb-2 text-center">Type</th>
+                            <th className="pb-2 text-center">Tenure</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gdvReport.comparables.map((comp, i) => (
+                            <tr key={i} className="border-b border-blue-100">
+                              <td className="py-2 text-xs">{comp.address}</td>
+                              <td className="py-2 text-right font-semibold">{formatPrice(comp.price)}</td>
+                              <td className="py-2 text-center text-xs text-gray-500">{comp.sale_date}</td>
+                              <td className="py-2 text-center text-xs">{comp.property_type}</td>
+                              <td className="py-2 text-center text-xs">{comp.tenure}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
 
                 {/* Confidence Statement */}
