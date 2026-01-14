@@ -65,7 +65,7 @@ class LandRegistryClient:
         self,
         postcode: str,
         property_type: str = "F",  # F=Flat
-        months_back: int = 24,
+        months_back: int = 36,  # 3 years max
         max_results: int = 50,
     ) -> list[ComparableSale]:
         """
@@ -249,7 +249,7 @@ class LandRegistryClient:
             else:
                 date_str = str(date_val) if date_val else ""
 
-            sale_date = datetime.now()
+            sale_date = None
             if date_str:
                 try:
                     # Try ISO format first (YYYY-MM-DD)
@@ -265,6 +265,16 @@ class LandRegistryClient:
                             sale_date = datetime.strptime(date_str, "%d %b %Y")
                         except ValueError:
                             logger.warning("Could not parse date", date_str=date_str)
+
+            # Skip records without valid transaction date
+            if sale_date is None:
+                logger.warning("Skipping sale with no valid date", address=item.get("propertyAddress", {}))
+                return None
+
+            # Skip transactions older than 3 years
+            max_age_days = 3 * 365  # 3 years
+            if (datetime.now() - sale_date).days > max_age_days:
+                return None
 
             # Parse address
             addr_obj = item.get("propertyAddress", {})

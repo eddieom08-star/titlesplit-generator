@@ -797,7 +797,7 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest, forc
         comparables_task = lr_client.get_comparable_sales(
             postcode=property.postcode,
             property_type="F",  # Flats
-            months_back=18,
+            months_back=36,  # 3 years max
         )
         epc_task = epc_client.search_by_postcode(property.postcode)
 
