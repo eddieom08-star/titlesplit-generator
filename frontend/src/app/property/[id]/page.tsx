@@ -113,6 +113,90 @@ export default function PropertyDetailPage() {
     }
   }
 
+  function downloadGDVReportMarkdown() {
+    if (!gdvReport || !property) return;
+
+    const ltvAmount = Math.round(gdvReport.total_gdv * 0.75);
+
+    const markdown = `# GDV Report - ${property.title}
+
+**Report Date:** ${new Date(gdvReport.report_date).toLocaleString()}
+**Data Freshness:** ${gdvReport.data_freshness}
+**Confidence Level:** ${gdvReport.gdv_confidence.toUpperCase()}
+
+---
+
+## GDV Summary
+
+| Metric | Value |
+|--------|-------|
+| **Total GDV** | ${formatPrice(gdvReport.total_gdv)} |
+| **GDV Range** | ${formatPrice(gdvReport.gdv_range_low)} - ${formatPrice(gdvReport.gdv_range_high)} |
+| **75% LTV** | ${formatPrice(ltvAmount)} |
+| **Asking Price** | ${formatPrice(gdvReport.asking_price)} |
+| **Gross Uplift** | ${formatPrice(gdvReport.gross_uplift)} (${gdvReport.gross_uplift_percent}%) |
+| **Net Uplift** | ${formatPrice(gdvReport.net_uplift)} (${gdvReport.net_uplift_percent}%) |
+
+---
+
+## Unit-by-Unit Valuations
+
+| Unit | Beds | Estimated Value | Range | Confidence | Method |
+|------|------|-----------------|-------|------------|--------|
+${gdvReport.unit_valuations.map(u =>
+  `| ${u.unit_identifier} | ${u.beds || '-'} | ${formatPrice(u.estimated_value)} | ${formatPrice(u.value_range_low)} - ${formatPrice(u.value_range_high)} | ${u.confidence} | ${u.primary_method} |`
+).join('\n')}
+
+---
+
+## Costs & Net Profit
+
+### Title Split Costs
+- Base costs: ${formatPrice(gdvReport.title_split_costs)}
+${gdvReport.refurbishment_budget ? `- Refurbishment: ${formatPrice(gdvReport.refurbishment_budget)}` : ''}
+- **Total Costs:** ${formatPrice(gdvReport.total_costs)}
+
+### Net Profit Analysis
+- **Net Profit Per Unit:** ${formatPrice(gdvReport.net_profit_per_unit)}
+- **Total Net Uplift:** ${formatPrice(gdvReport.net_uplift)} (${gdvReport.net_uplift_percent}% return)
+
+---
+
+## Comparable Evidence
+
+- **Total Comparables:** ${gdvReport.comparables_summary.count}
+${gdvReport.comparables_summary.price_range ? `- **Price Range:** ${gdvReport.comparables_summary.price_range}` : ''}
+${gdvReport.comparables_summary.average ? `- **Average:** ${formatPrice(gdvReport.comparables_summary.average)}` : ''}
+${gdvReport.comparables_summary.median ? `- **Median:** ${formatPrice(gdvReport.comparables_summary.median)}` : ''}
+
+---
+
+## Confidence Statement
+
+${gdvReport.confidence_statement}
+
+---
+
+## Limitations & Caveats
+
+${gdvReport.limitations.map(l => `- ${l}`).join('\n')}
+
+---
+
+**Data Sources:** ${gdvReport.data_sources.join(', ')}
+`;
+
+    const blob = new Blob([markdown], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gdv-report-${property.postcode?.replace(/\s+/g, '-') || propertyId}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   async function handleFloorplanUpload() {
     if (!floorplanFile) return;
 
@@ -825,14 +909,24 @@ export default function PropertyDetailPage() {
               </p>
             </div>
 
-            <Button
-              onClick={handleGenerateGDVReport}
-              disabled={generatingReport}
-              className="w-full"
-              variant="outline"
-            >
-              {generatingReport ? 'Generating Report...' : 'Generate GDV Report'}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleGenerateGDVReport}
+                disabled={generatingReport}
+                className="flex-1"
+                variant="outline"
+              >
+                {generatingReport ? 'Generating Report...' : 'Generate GDV Report'}
+              </Button>
+              {gdvReport && (
+                <Button
+                  onClick={downloadGDVReportMarkdown}
+                  variant="secondary"
+                >
+                  Download MD
+                </Button>
+              )}
+            </div>
 
             {gdvReport && (
               <div className="space-y-4 mt-4">
@@ -847,13 +941,18 @@ export default function PropertyDetailPage() {
                       {gdvReport.gdv_confidence.toUpperCase()} Confidence
                     </Badge>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <div>
                       <p className="text-xs text-gray-500">Total GDV</p>
                       <p className="text-xl font-bold text-green-700">{formatPrice(gdvReport.total_gdv)}</p>
                       <p className="text-xs text-gray-400">
                         {formatPrice(gdvReport.gdv_range_low)} - {formatPrice(gdvReport.gdv_range_high)}
                       </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">75% LTV</p>
+                      <p className="text-lg font-bold text-blue-700">{formatPrice(Math.round(gdvReport.total_gdv * 0.75))}</p>
+                      <p className="text-xs text-gray-400">Max loan at 75%</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500">Asking Price</p>
