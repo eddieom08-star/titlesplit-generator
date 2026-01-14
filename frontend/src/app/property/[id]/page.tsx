@@ -169,11 +169,19 @@ ${gdvReport.comparables_summary.price_range ? `- **Price Range:** ${gdvReport.co
 ${gdvReport.comparables_summary.average ? `- **Average:** ${formatPrice(gdvReport.comparables_summary.average)}` : ''}
 ${gdvReport.comparables_summary.median ? `- **Median:** ${formatPrice(gdvReport.comparables_summary.median)}` : ''}
 
-${gdvReport.comparables && gdvReport.comparables.length > 0 ? `### Land Registry Transactions
+${gdvReport.comparables && gdvReport.comparables.length > 0 ? `### Land Registry Transactions (Last 3 Years)
 
 | Address | Price | Date | Type | Tenure |
 |---------|-------|------|------|--------|
 ${gdvReport.comparables.map(c => `| [${c.address}](${c.land_registry_url}) | ${formatPrice(c.price)} | ${c.sale_date} | ${c.property_type} | ${c.tenure} |`).join('\n')}` : ''}
+
+${gdvReport.historical_comparables && gdvReport.historical_comparables.length > 0 ? `### Historical Transactions (Older than 3 Years)
+
+*Note: Historical data shown for reference only. Not used in GDV calculations.*
+
+| Address | Price | Date | Type | Tenure |
+|---------|-------|------|------|--------|
+${gdvReport.historical_comparables.map(c => `| [${c.address}](${c.land_registry_url}) | ${formatPrice(c.price)} | ${c.sale_date} | ${c.property_type} | ${c.tenure} |`).join('\n')}` : ''}
 
 ---
 
@@ -1075,10 +1083,10 @@ ${gdvReport.limitations.map(l => `- ${l}`).join('\n')}
                     )}
                   </div>
 
-                  {/* Individual Comparables Table */}
+                  {/* Individual Comparables Table - Recent (within 3 years) */}
                   {gdvReport.comparables && gdvReport.comparables.length > 0 && (
                     <div className="overflow-x-auto border-t border-blue-200 pt-3">
-                      <p className="text-xs text-blue-700 mb-2 font-medium">Land Registry Transactions</p>
+                      <p className="text-xs text-blue-700 mb-2 font-medium">Land Registry Transactions (Last 3 Years)</p>
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-left text-gray-500 border-b">
@@ -1110,6 +1118,45 @@ ${gdvReport.limitations.map(l => `- ${l}`).join('\n')}
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+
+                  {/* Historical Comparables Table - Older than 3 years */}
+                  {gdvReport.historical_comparables && gdvReport.historical_comparables.length > 0 && (
+                    <div className="overflow-x-auto border-t border-gray-300 pt-3 mt-4">
+                      <p className="text-xs text-gray-600 mb-2 font-medium">Historical Transactions (Older than 3 Years)</p>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-400 border-b">
+                            <th className="pb-2">Address</th>
+                            <th className="pb-2 text-right">Price</th>
+                            <th className="pb-2 text-center">Date</th>
+                            <th className="pb-2 text-center">Type</th>
+                            <th className="pb-2 text-center">Tenure</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gdvReport.historical_comparables.map((comp, i) => (
+                            <tr key={i} className="border-b border-gray-100 text-gray-500">
+                              <td className="py-2 text-xs">
+                                <a
+                                  href={comp.land_registry_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-gray-500 hover:underline"
+                                >
+                                  {comp.address}
+                                </a>
+                              </td>
+                              <td className="py-2 text-right font-medium">{formatPrice(comp.price)}</td>
+                              <td className="py-2 text-center text-xs">{comp.sale_date}</td>
+                              <td className="py-2 text-center text-xs">{comp.property_type}</td>
+                              <td className="py-2 text-center text-xs">{comp.tenure}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <p className="text-xs text-gray-400 mt-2 italic">Note: Historical data shown for reference only. Not used in GDV calculations.</p>
                     </div>
                   )}
                 </div>

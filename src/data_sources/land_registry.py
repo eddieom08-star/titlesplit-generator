@@ -271,11 +271,6 @@ class LandRegistryClient:
                 logger.warning("Skipping sale with no valid date", address=item.get("propertyAddress", {}))
                 return None
 
-            # Skip transactions older than 3 years
-            max_age_days = 3 * 365  # 3 years
-            if (datetime.now() - sale_date).days > max_age_days:
-                return None
-
             # Parse address
             addr_obj = item.get("propertyAddress", {})
             address_parts = [

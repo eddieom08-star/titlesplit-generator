@@ -3,7 +3,7 @@ import asyncio
 import base64
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, File, UploadFile
 from pydantic import BaseModel, Field
@@ -688,7 +688,8 @@ class GDVReportResponse(BaseModel):
     # Market context
     local_market_data: dict
     comparables_summary: dict
-    comparables: list[ComparableDetail] = []
+    comparables: list[ComparableDetail] = []  # Recent (within 3 years)
+    historical_comparables: list[ComparableDetail] = []  # Older than 3 years
 
     # Report metadata
     data_sources: list[str]
@@ -797,31 +798,37 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest, forc
         comparables_task = lr_client.get_comparable_sales(
             postcode=property.postcode,
             property_type="F",  # Flats
-            months_back=36,  # 3 years max
+            months_back=120,  # 10 years to get historical data
         )
         epc_task = epc_client.search_by_postcode(property.postcode)
 
-        comparables, epcs = await asyncio.gather(comparables_task, epc_task)
+        all_comparables, epcs = await asyncio.gather(comparables_task, epc_task)
 
-        # Initialize calculator and generate report
+        # Split comparables into recent (within 3 years) and historical (older)
+        three_years_ago = datetime.now() - timedelta(days=3 * 365)
+        recent_comparables = [c for c in all_comparables if c.sale_date >= three_years_ago]
+        historical_comparables = [c for c in all_comparables if c.sale_date < three_years_ago]
+
+        # Initialize calculator and generate report (use only recent for GDV calculation)
         calculator = GDVCalculator(
             land_registry_client=lr_client,
         )
 
-        logger.info("Calculating GDV", units=len(units), asking_price=effective_price)
+        logger.info("Calculating GDV", units=len(units), asking_price=effective_price, recent_comps=len(recent_comparables), historical_comps=len(historical_comparables))
         report = await calculator.calculate_block_gdv(
             postcode=property.postcode,
             units=units,
             asking_price=effective_price,
-            comparables=comparables,
+            comparables=recent_comparables,  # Use only recent for GDV
             epcs=epcs,
             split_costs=request.refurbishment_budget or 0,
         )
 
         # Serialize comparables for response
         from urllib.parse import quote
-        serialized_comparables = [
-            ComparableDetail(
+
+        def serialize_comparable(c) -> ComparableDetail:
+            return ComparableDetail(
                 address=c.address,
                 postcode=c.postcode,
                 price=c.price,
@@ -830,8 +837,9 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest, forc
                 tenure={"F": "Freehold", "L": "Leasehold"}.get(c.estate_type, c.estate_type),
                 land_registry_url=f"https://landregistry.data.gov.uk/app/ppd?postcode={quote(c.postcode)}",
             )
-            for c in comparables[:15]  # Limit to 15 for UI display
-        ]
+
+        serialized_recent = [serialize_comparable(c) for c in recent_comparables[:15]]
+        serialized_historical = [serialize_comparable(c) for c in historical_comparables[:10]]
 
         # Build response
         response = GDVReportResponse(
@@ -856,7 +864,8 @@ async def generate_gdv_report(property_id: UUID, request: GDVReportRequest, forc
             net_profit_per_unit=report.net_profit_per_unit,
             local_market_data=report.local_market_data,
             comparables_summary=report.comparables_summary,
-            comparables=serialized_comparables,
+            comparables=serialized_recent,
+            historical_comparables=serialized_historical,
             data_sources=report.data_sources,
             data_freshness=report.data_freshness,
             confidence_statement=report.confidence_statement,

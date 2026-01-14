@@ -408,6 +408,15 @@ export interface GDVReport {
     tenure: string;
     land_registry_url: string;
   }[];
+  historical_comparables: {
+    address: string;
+    postcode: string;
+    price: number;
+    sale_date: string;
+    property_type: string;
+    tenure: string;
+    land_registry_url: string;
+  }[];
 
   // Report metadata
   data_sources: string[];
