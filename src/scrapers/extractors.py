@@ -7,9 +7,17 @@ from typing import Optional, Union, List
 
 @dataclass
 class ExtractionResult:
-    value: Union[str, int, None]
+    value: Union[str, int, float, None]
     confidence: float
     pattern_matched: Optional[str] = None
+
+
+@dataclass
+class FloorAreaResult:
+    sqft: Optional[float]
+    sqm: Optional[float]
+    confidence: float
+    source: str  # 'explicit', 'calculated', 'typical'
 
 
 # Word to number mapping
@@ -18,6 +26,15 @@ WORD_TO_NUMBER = {
     'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
     'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
     'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20,
+}
+
+# Typical floor areas by bedroom count (UK averages in sqft)
+TYPICAL_FLOOR_AREAS_SQFT = {
+    0: 350,   # Studio
+    1: 450,   # 1-bed flat
+    2: 650,   # 2-bed flat
+    3: 850,   # 3-bed flat
+    4: 1100,  # 4-bed flat
 }
 
 
@@ -31,18 +48,26 @@ def normalize_numbers_in_text(text: str) -> str:
 
 # Unit count extraction patterns (ordered by reliability)
 UNIT_COUNT_PATTERNS = [
-    # Explicit statements
-    (r'block of (\d+) (?:self[- ]?contained )?(?:flats|apartments)', 0.95),
-    (r'(\d+) (?:self[- ]?contained )?(?:flats|apartments|units)', 0.90),
-    (r'(\d+) flats? in a? ?(?:converted|victorian|period)', 0.92),
-    (r'comprises (\d+)', 0.85),
-    (r'containing (\d+)', 0.85),
-    (r'converted (?:into|to) (\d+)', 0.90),
+    # Explicit statements - high confidence
+    (r'block of (\d+) (?:self[- ]?contained )?(?:flats?|apartments?|units?)', 0.95),
+    (r'(\d+) (?:self[- ]?contained )?(?:flats?|apartments?|units?) (?:over|across|on)', 0.95),
+    (r'currently (?:arranged|configured|set up) as (\d+) (?:flats?|units?|apartments?)', 0.95),
+    (r'comprises? (?:of )?(\d+) (?:self[- ]?contained )?(?:flats?|units?|apartments?)', 0.95),
+    (r'containing (\d+) (?:self[- ]?contained )?(?:flats?|units?|apartments?)', 0.93),
+    (r'converted (?:into|to) (\d+)', 0.92),
+    (r'(\d+) (?:self[- ]?contained )?(?:flats?|apartments?|units?)', 0.90),
+    (r'(\d+) flats? in a? ?(?:converted|victorian|period|georgian|edwardian)', 0.92),
+    # Floor-based patterns
+    (r'ground floor flat (?:plus|and|with) (\d+) (?:flats?|units?) above', 0.90),
+    (r'(\d+) floors? (?:of|with) (?:flats?|apartments?)', 0.85),
     # Bedroom-based inference
-    (r'(\d+) x \d[- ]?bed', 0.80),  # "4 x 2-bed flats"
-    (r'(\d+) \d[- ]?bedroom flats', 0.80),
-    # Weaker patterns
-    (r'(\d+)[- ]?storey', 0.60),  # May indicate units
+    (r'(\d+) ?x ?\d[- ]?bed(?:room)?', 0.85),  # "4 x 2-bed flats"
+    (r'(\d+) \d[- ]?bedroom (?:flats?|apartments?|units?)', 0.85),
+    # Counting patterns
+    (r'(?:first|1st|ground) (?:and|&) (?:second|2nd) floor flats?', 0.80),  # Implies 2+ units
+    (r'(\d+)[- ]?storey (?:building|block|house) (?:with|comprising)', 0.70),
+    # Weaker patterns - lower confidence
+    (r'(\d+)[- ]?storey', 0.50),  # May indicate units
 ]
 
 # Tenure extraction patterns
@@ -192,4 +217,111 @@ def extract_bedrooms(text: str) -> list[dict]:
             'bedrooms': int(beds)
         })
 
+    # Pattern: "2 x one bed, 2 x two bed"
+    text_normalized = normalize_numbers_in_text(text_lower)
+    pattern2 = r'(\d+)\s*x\s*(\d+)[- ]?bed(?:room)?'
+    matches2 = re.findall(pattern2, text_normalized)
+    for count, beds in matches2:
+        if {'count': int(count), 'bedrooms': int(beds)} not in breakdown:
+            breakdown.append({
+                'count': int(count),
+                'bedrooms': int(beds)
+            })
+
     return breakdown
+
+
+# Floor area extraction patterns
+FLOOR_AREA_PATTERNS = [
+    # Square feet patterns
+    (r'(\d{2,4})\s*(?:sq\.?\s*ft\.?|sqft|square feet)', 'sqft', 0.95),
+    (r'(\d{2,4})\s*ft²', 'sqft', 0.95),
+    (r'approximately\s*(\d{2,4})\s*(?:sq\.?\s*ft\.?|sqft)', 'sqft', 0.85),
+    (r'approx\.?\s*(\d{2,4})\s*(?:sq\.?\s*ft\.?|sqft)', 'sqft', 0.85),
+    (r'circa\s*(\d{2,4})\s*(?:sq\.?\s*ft\.?|sqft)', 'sqft', 0.80),
+    # Square meters patterns
+    (r'(\d{2,4})\s*(?:sq\.?\s*m\.?|sqm|square met(?:er|re)s?)', 'sqm', 0.95),
+    (r'(\d{2,4})\s*m²', 'sqm', 0.95),
+    (r'approximately\s*(\d{2,4})\s*(?:sq\.?\s*m\.?|sqm)', 'sqm', 0.85),
+]
+
+
+def extract_floor_area(text: str, bedrooms: Optional[int] = None) -> FloorAreaResult:
+    """
+    Extract floor area from listing text.
+
+    Returns both sqft and sqm (converting as needed).
+    Falls back to typical area if bedrooms known.
+    """
+    text_lower = text.lower()
+
+    for pattern, unit, confidence in FLOOR_AREA_PATTERNS:
+        match = re.search(pattern, text_lower)
+        if match:
+            try:
+                value = float(match.group(1))
+                # Sanity check the value (realistic flat sizes)
+                if unit == 'sqft' and 100 <= value <= 5000:
+                    sqm = value / 10.764
+                    return FloorAreaResult(
+                        sqft=value,
+                        sqm=round(sqm, 1),
+                        confidence=confidence,
+                        source='explicit'
+                    )
+                elif unit == 'sqm' and 10 <= value <= 500:
+                    sqft = value * 10.764
+                    return FloorAreaResult(
+                        sqft=round(sqft, 0),
+                        sqm=value,
+                        confidence=confidence,
+                        source='explicit'
+                    )
+            except (ValueError, IndexError):
+                continue
+
+    # Fall back to typical area based on bedrooms
+    if bedrooms is not None and bedrooms in TYPICAL_FLOOR_AREAS_SQFT:
+        typical_sqft = TYPICAL_FLOOR_AREAS_SQFT[bedrooms]
+        return FloorAreaResult(
+            sqft=typical_sqft,
+            sqm=round(typical_sqft / 10.764, 1),
+            confidence=0.50,
+            source='typical'
+        )
+
+    return FloorAreaResult(sqft=None, sqm=None, confidence=0.0, source='unknown')
+
+
+def extract_total_bedrooms(text: str) -> ExtractionResult:
+    """
+    Extract total bedroom count from listing text.
+
+    This is different from extract_bedrooms which gets the breakdown.
+    This extracts explicit statements like "6 bedroom property".
+    """
+    text_lower = text.lower()
+    text_normalized = normalize_numbers_in_text(text_lower)
+
+    # Explicit total bedroom patterns
+    patterns = [
+        (r'(\d+)\s*bed(?:room)?\s*(?:property|house|building|block)', 0.90),
+        (r'(\d+)\s*bedroom', 0.85),
+        (r'(\d+)\s*bed\b', 0.75),
+    ]
+
+    for pattern, confidence in patterns:
+        match = re.search(pattern, text_normalized)
+        if match:
+            try:
+                beds = int(match.group(1))
+                if 1 <= beds <= 30:  # Sanity check
+                    return ExtractionResult(
+                        value=beds,
+                        confidence=confidence,
+                        pattern_matched=pattern
+                    )
+            except (ValueError, IndexError):
+                continue
+
+    return ExtractionResult(value=None, confidence=0.0)

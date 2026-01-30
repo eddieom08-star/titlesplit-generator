@@ -70,7 +70,7 @@ export default function Dashboard() {
 
   async function handleTriggerScrape() {
     try {
-      const result = await triggerScrape();
+      await triggerScrape();
       toast({
         title: 'Scraper Started',
         description: 'Searching for new opportunities...',

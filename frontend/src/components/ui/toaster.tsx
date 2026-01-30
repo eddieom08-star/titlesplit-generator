@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Toast, type ToastProps } from "./toast";
+import { Toast } from "./toast";
 
 type ToastVariant = "default" | "success" | "error" | "warning" | "info";
 

@@ -15,6 +15,9 @@ from src.scrapers.extractors import (
     extract_red_flags,
     extract_postcode,
     extract_bedrooms,
+    extract_floor_area,
+    extract_total_bedrooms,
+    FloorAreaResult,
 )
 
 logger = structlog.get_logger()
@@ -81,6 +84,19 @@ class ScrapedProperty:
     bedroom_breakdown: list[dict]
     listed_date: Optional[datetime]
     raw_data: dict
+    # Additional extracted fields
+    bedrooms: Optional[int] = None  # Total bedrooms from API or text
+    bathrooms: Optional[int] = None  # Total bathrooms from API
+    floor_area_sqft: Optional[float] = None  # Floor area in sqft
+    floor_area_sqm: Optional[float] = None  # Floor area in sqm
+    floor_area_source: str = "unknown"  # Where floor area came from
+    property_type: Optional[str] = None  # Property type from API
+    has_floorplan: bool = False  # Whether floorplan images exist
+    key_features: list[str] = None  # Key features from listing
+
+    def __post_init__(self):
+        if self.key_features is None:
+            self.key_features = []
 
 
 class RightmoveScraper:
@@ -267,6 +283,20 @@ class RightmoveScraper:
             except (ValueError, TypeError):
                 pass
 
+        # Extract direct fields from API (more reliable than text extraction)
+        api_bedrooms = data.get("bedrooms")
+        api_bathrooms = data.get("bathrooms")
+        property_type = data.get("propertyTypeFullDescription", "")
+
+        # Check for floorplan availability
+        floorplan_images = data.get("floorplanImages", {}).get("images", [])
+        has_floorplan = len(floorplan_images) > 0
+
+        # Initialize floor area
+        floor_area_sqft = None
+        floor_area_sqm = None
+        floor_area_source = "unknown"
+
         # Run text extraction
         unit_result = extract_unit_count(full_text)
         tenure_result = extract_tenure(full_text)
@@ -274,10 +304,24 @@ class RightmoveScraper:
         red_flags = extract_red_flags(full_text)
         bedroom_breakdown = extract_bedrooms(full_text)
 
+        # Extract floor area from text if not in API
+        floor_area_result = extract_floor_area(full_text, api_bedrooms)
+        if floor_area_result.sqft:
+            floor_area_sqft = floor_area_result.sqft
+            floor_area_sqm = floor_area_result.sqm
+            floor_area_source = floor_area_result.source
+
+        # Try to extract total bedrooms from text if not in API
+        bedrooms = api_bedrooms
+        if not bedrooms:
+            total_beds_result = extract_total_bedrooms(full_text)
+            if total_beds_result.value:
+                bedrooms = total_beds_result.value
+
         return ScrapedProperty(
             source_id=property_id,
             source_url=self.PROPERTY_URL.format(property_id=property_id),
-            title=data.get("propertyTypeFullDescription", ""),
+            title=property_type,
             asking_price=asking_price,
             price_qualifier=price_data.get("displayPrices", [{}])[0].get("displayPriceQualifier"),
             address_line1=address_line1,
@@ -298,6 +342,14 @@ class RightmoveScraper:
             bedroom_breakdown=bedroom_breakdown,
             listed_date=listed_date,
             raw_data=data,
+            # Additional fields
+            bedrooms=bedrooms,
+            bathrooms=api_bathrooms,
+            floor_area_sqft=floor_area_sqft,
+            floor_area_sqm=floor_area_sqm,
+            floor_area_source=floor_area_source,
+            property_type=property_type,
+            has_floorplan=has_floorplan,
         )
 
     async def search_all_locations(

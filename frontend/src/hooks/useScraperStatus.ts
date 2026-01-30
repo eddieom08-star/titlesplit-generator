@@ -42,13 +42,19 @@ interface ApiStatusResponse {
   last_completed: ApiJobSummary | null;
 }
 
+export interface StatusTransition {
+  wasRunning: boolean;
+  isNowIdle: boolean;
+  lastCompleted: ApiJobSummary | null;
+}
+
 export interface UseScraperStatusReturn {
   status: 'idle' | 'running' | 'error';
   currentJob: CurrentJob | null;
   lastCompleted: LastCompleted | null;
   isRunning: boolean;
   errorMessage: string | null;
-  refetch: () => Promise<void>;
+  refetch: () => Promise<StatusTransition | null>;
 }
 
 function transformJob(job: ApiJobSummary | null): CurrentJob | null {
