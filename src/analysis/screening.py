@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 from src.models.property import Property
 from src.scrapers.extractors import RED_FLAGS
@@ -18,38 +17,41 @@ def initial_screen(property: Property) -> ScreeningResult:
     Fast screening based on hard criteria.
 
     Returns screening result with pass/fail and reasons.
+    Properties are only rejected for severe issues.
+    Unknown/unclear data generates warnings, not rejections.
     """
     rejections = []
     warnings = []
 
-    # Must have estimated units
+    # Unit count - unknown is a warning, not a rejection
     if not property.estimated_units or property.estimated_units < 2:
-        rejections.append("unit_count_unclear")
+        warnings.append("unit_count_unclear")
+    elif property.estimated_units > 10:
+        warnings.append("large_block")  # May still be viable
 
-    if property.estimated_units and property.estimated_units > 10:
-        rejections.append("too_many_units")
-
-    # Must be freehold or unknown (not confirmed leasehold)
+    # Tenure - only confirmed leasehold is a rejection
     if property.tenure == "leasehold":
         rejections.append("confirmed_leasehold")
+    elif property.tenure == "share_of_freehold":
+        warnings.append("share_of_freehold")  # Could still investigate
 
-    if property.tenure == "share_of_freehold":
-        rejections.append("share_of_freehold")
-
-    # Price per unit sanity check
+    # Price per unit sanity check - high price is warning, not rejection
     if property.price_per_unit:
-        if property.price_per_unit > 150000:
-            rejections.append("price_per_unit_too_high")
-        if property.price_per_unit < 20000:
+        if property.price_per_unit > 200000:
+            warnings.append("price_per_unit_high")
+        elif property.price_per_unit < 20000:
             warnings.append("price_per_unit_suspicious")
 
     # Red flags from description
     description = (property.title or "") + " " + getattr(property, 'description', '')
     description_lower = description.lower()
 
+    # Only severe structural/title issues cause rejection
+    SEVERE_FLAGS = ["subsidence", "japanese knotweed", "flying freehold"]
+
     for flag_phrase, category in RED_FLAGS:
         if flag_phrase in description_lower:
-            if category in ["title_complexity", "condition_risk"]:
+            if flag_phrase in SEVERE_FLAGS:
                 rejections.append(f"red_flag_{category}")
             else:
                 warnings.append(f"warning_{category}")
@@ -74,11 +76,11 @@ def calculate_quick_score(
     if rejections:
         return 0
 
-    score = 50  # Base score for passing basic screening
+    score = 60  # Higher base score - most properties deserve investigation
 
     # Tenure bonus
     if property.tenure == "freehold":
-        score += 20
+        score += 15
         if property.tenure_confidence and property.tenure_confidence > 0.8:
             score += 5
     elif property.tenure == "unknown":
@@ -90,6 +92,8 @@ def calculate_quick_score(
             score += 10
         elif 2 <= property.estimated_units <= 8:
             score += 5
+        elif property.estimated_units > 8:
+            score += 3  # Still potentially viable
 
     # Price per unit bonus
     if property.price_per_unit:
@@ -97,11 +101,13 @@ def calculate_quick_score(
             score += 10
         elif property.price_per_unit < 75000:
             score += 5
+        elif property.price_per_unit < 100000:
+            score += 2
 
-    # Deduct for warnings
-    score -= len(warnings) * 3
+    # Deduct for warnings (less aggressive)
+    score -= len(warnings) * 2
 
-    return max(0, min(100, score))
+    return max(10, min(100, score))  # Minimum 10 for any passing property
 
 
 def screen_batch(properties: list[Property]) -> list[tuple[Property, ScreeningResult]]:
