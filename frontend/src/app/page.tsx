@@ -1,20 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/components/ui/toaster';
+import { ScraperStatus } from '@/components/ScraperStatus';
+import { useScraperStatus } from '@/hooks/useScraperStatus';
 import { Opportunity, AnalysisResult, ValuationResult, OpportunityFilters, getOpportunities, formatPrice, getScoreColor, triggerScrape, analyzeUrl, getValuation, archiveProperty } from '@/lib/api';
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [scraping, setScraping] = useState(false);
-  const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
+  const { toast } = useToast();
+  const { isRunning, lastCompleted, refetch: refetchStatus } = useScraperStatus();
+  const prevIsRunningRef = useRef(false);
   const [urlInput, setUrlInput] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
@@ -35,6 +39,21 @@ export default function Dashboard() {
     loadOpportunities();
   }, [filters]);
 
+  // Watch for scraping completion and show toast
+  useEffect(() => {
+    if (prevIsRunningRef.current && !isRunning && lastCompleted) {
+      // Scraping just finished
+      toast({
+        title: 'Scraping Complete',
+        description: `Found ${lastCompleted.properties_found} properties (${lastCompleted.new_properties} new)`,
+        variant: 'success',
+      });
+      // Refresh opportunities
+      loadOpportunities();
+    }
+    prevIsRunningRef.current = isRunning;
+  }, [isRunning, lastCompleted, toast]);
+
   async function loadOpportunities() {
     try {
       setLoading(true);
@@ -51,17 +70,31 @@ export default function Dashboard() {
 
   async function handleTriggerScrape() {
     try {
-      setScraping(true);
-      setScrapeMessage(null);
       const result = await triggerScrape();
-      setScrapeMessage(result.message);
-      // Refresh opportunities after a short delay to allow scraping to start
-      setTimeout(() => loadOpportunities(), 5000);
-    } catch (err) {
-      setScrapeMessage('Failed to trigger scrape');
+      toast({
+        title: 'Scraper Started',
+        description: 'Searching for new opportunities...',
+        variant: 'info',
+      });
+      // Refresh status immediately
+      refetchStatus();
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to start scraper';
+      // Check if it's already running (409 conflict)
+      if (errorMessage.includes('already running')) {
+        toast({
+          title: 'Scraper Already Running',
+          description: 'A scrape is already in progress',
+          variant: 'warning',
+        });
+      } else {
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'error',
+        });
+      }
       console.error(err);
-    } finally {
-      setScraping(false);
     }
   }
 
@@ -145,18 +178,16 @@ export default function Dashboard() {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Title Split Finder</h1>
               <p className="text-sm text-gray-500">UK Property Investment Opportunities</p>
-              {scrapeMessage && (
-                <p className="text-xs text-green-600 mt-1">{scrapeMessage}</p>
-              )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-3">
+              <ScraperStatus />
               <Button
                 onClick={handleTriggerScrape}
-                disabled={scraping}
+                disabled={isRunning}
                 variant="outline"
                 size="sm"
               >
-                Run Scraper
+                {isRunning ? 'Scraping...' : 'Run Scraper'}
               </Button>
               <Button onClick={loadOpportunities} variant="outline" size="sm">
                 Refresh
